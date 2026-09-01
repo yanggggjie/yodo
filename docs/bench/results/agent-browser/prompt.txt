@@ -1,0 +1,8 @@
+agent-browser默认打开测试版chrome无法登陆google账户
+使用命令行打开本地标准版chrome，以非headless模式便于登录，保证profile在~/temp-agent-browser-profile/目录，然后用CDP连接chrome
+
+使用 agent-browser
+
+1. 打开 X 关注流，取最近 3 条，总结成一段中文摘要，后缀带 from-agent-browser
+2. 用这段摘要发一条知乎想法
+3. 用这段摘要发一条即刻新动态

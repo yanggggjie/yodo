@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/release-it@20/schema/release-it.json",
+  "git": {
+    "commitMessage": "${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Release ${version}",
+    "requireCleanWorkingDir": true,
+    "requireCommits": true,
+    "addUntrackedFiles": false,
+    "push": true,
+    "pushArgs": ["--follow-tags"]
+  },
+  "npm": {
+    "publish": true
+  },
+  "github": {
+    "release": false
+  }
+}

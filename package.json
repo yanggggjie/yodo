@@ -1,0 +1,40 @@
+{
+  "name": "yodo-cli",
+  "version": "2.5.0",
+  "type": "module",
+  "description": "Record website workflows, learn reusable capabilities, and run agent tasks",
+  "bin": {
+    "yodo": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "templates"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc && chmod +x dist/cli/index.js",
+    "lint": "tsc --noEmit",
+    "selfcheck": "find dist -name '*.selfcheck.js' | sort | while read -r f; do node \"$f\" || exit 1; done",
+    "test": "npm run build && npm run selfcheck",
+    "yodo": "node dist/cli/index.js",
+    "dev:install": "npm run build && node dist/cli/index.js init --local",
+    "prepack": "npm run build",
+    "release": "release-it"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@ghostery/adblocker": "^2.18.2",
+    "tldts": "^7.4.11",
+    "write-file-atomic": "^7.0.1",
+    "yaml": "^2.8.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "@types/write-file-atomic": "^4.0.3",
+    "release-it": "^20.2.0",
+    "typescript": "^5.8.3"
+  }
+}
