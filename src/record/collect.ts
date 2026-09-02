@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { MAX_BODY_BYTES } from "../utils/constants.js";
+import { MAX_BODY_BYTES, RESPONSE_SPLIT_BYTES } from "../utils/constants.js";
 import { parseUrl } from "../utils/url.js";
 import { createLogger } from "../utils/logger.js";
 import { isChromeUiUrl, setDiscoverTargets, setPageAutoAttach, type RawCdpConnection } from "../browser/index.js";
@@ -149,7 +149,6 @@ export class ActiveRecordStore {
 
   constructor(
     readonly name: string,
-    readonly goal: string | undefined,
     readonly startedAt: number,
     recordDir: string,
   ) {
@@ -378,6 +377,26 @@ function contentTypeOf(headers: Record<string, string> | undefined): string {
   return headers["content-type"] ?? headers["Content-Type"] ?? "";
 }
 
+async function attachResponseBody(
+  row: RawRequest,
+  recordDir: string,
+  bytes: Buffer,
+  kind: "html" | "json",
+): Promise<void> {
+  if (bytes.byteLength > MAX_BODY_BYTES) {
+    row.responseBodyUnavailableReason = "response-body-too-large";
+    return;
+  }
+  if (bytes.byteLength > RESPONSE_SPLIT_BYTES) {
+    const rel = `${row.id}.response.${kind === "html" ? "html" : "json"}`;
+    await fs.writeFile(path.join(recordDir, rel), bytes);
+    row.responseBodyPath = rel;
+    return;
+  }
+  const raw = bytes.toString("utf8");
+  row.responseBody = kind === "html" ? raw : parseText(raw);
+}
+
 export async function startCdpNetworkRecorder(
   raw: RawCdpConnection,
   store: ActiveRecordStore,
@@ -485,13 +504,7 @@ export async function startCdpNetworkRecorder(
         const bytes = body.base64Encoded
           ? Buffer.from(body.body, "base64")
           : Buffer.from(body.body, "utf8");
-        if (bytes.byteLength > MAX_BODY_BYTES) {
-          row.responseBodyUnavailableReason = "response-body-too-large";
-          return;
-        }
-        const rel = `${row.id}.response.html`;
-        await fs.writeFile(path.join(store.recordDir, rel), bytes);
-        row.responseBodyPath = rel;
+        await attachResponseBody(row, store.recordDir, bytes, "html");
       } catch (error) {
         row.responseBodyUnavailableReason =
           error instanceof Error ? error.message : "document-response-failed";
@@ -520,11 +533,7 @@ export async function startCdpNetworkRecorder(
       const bytes = body.base64Encoded
         ? Buffer.from(body.body, "base64")
         : Buffer.from(body.body, "utf8");
-      if (bytes.byteLength > MAX_BODY_BYTES) {
-        row.responseBodyUnavailableReason = "response-body-too-large";
-        return;
-      }
-      row.responseBody = parseText(bytes.toString("utf8"));
+      await attachResponseBody(row, store.recordDir, bytes, "json");
     } catch (error) {
       row.responseBodyUnavailableReason =
         error instanceof Error ? error.message : "response-body-unavailable";
@@ -654,18 +663,14 @@ export async function startCdpNetworkRecorder(
       if (!isRecordableUrl(href)) return;
       const html = typeof v.html === "string" ? v.html : "";
       if (!html.includes("<")) return;
-      const oversized = Buffer.byteLength(html) > MAX_BODY_BYTES;
-      store.appendRequest(
+      const row = store.appendRequest(
         {
           requestType: "mainDoc",
-          method: "GET",
           url: parseUrl(href),
           frameUrl: parseUrl(href),
           headers: {},
-          status: 200,
           requestBody: null,
-          responseBody: oversized ? null : html,
-          ...(oversized ? { responseBodyUnavailableReason: "response-body-too-large" } : {}),
+          responseBody: null,
           late: true,
           startedAt: Date.now(),
           endedAt: Date.now(),
@@ -673,6 +678,7 @@ export async function startCdpNetworkRecorder(
         true,
         ps.targetId,
       );
+      await attachResponseBody(row, store.recordDir, Buffer.from(html, "utf8"), "html");
     } catch {
       /* skip */
     }

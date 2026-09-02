@@ -9,7 +9,7 @@ export type Redaction = {
   bytes: number;
 };
 
-export type RequestKind = "document" | "xhr" | "fetch" | "other";
+export type RequestKind = "document" | "xhr" | "fetch";
 export type TimelineRequestType = "mainDoc" | "doc" | "fetch" | "xhr";
 export type TimelineActionType = "click" | "submit" | "scroll";
 
@@ -17,7 +17,7 @@ export type TimelineRequestItem = {
   t: number;
   type: "request";
   requestType: TimelineRequestType;
-  method: string;
+  method?: string;
   url: string;
   file: string;
 };
@@ -36,7 +36,7 @@ export type RawRequest = {
   id: string;
   requestType: TimelineRequestType;
   mainFrame: boolean;
-  method: string;
+  method?: string;
   url: YodoUrl;
   frameUrl: YodoUrl;
   headers: Record<string, string>;

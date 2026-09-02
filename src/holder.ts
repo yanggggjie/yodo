@@ -26,7 +26,7 @@ import {
 } from "./protocol.js";
 import {
   CDP_COMMAND_TIMEOUT_MS,
-  HARD_PROBE_MS,
+  CDP_SHORT_TIMEOUT_MS,
   SESSION_DIR,
   SESSION_LOG,
   SESSION_PID_FILE,
@@ -62,10 +62,6 @@ function pingBody(): Pick<SessionResponse, "pid" | "chrome" | "pages" | "record"
   };
 }
 
-function phaseOf(op: SessionRequest["op"]): "run" | "record" {
-  return op.startsWith("record") ? "record" : "run";
-}
-
 function warnCatch(label: string): (err: unknown) => void {
   return (err) => {
     logger.warn(label, { err: err instanceof Error ? err.message : String(err) });
@@ -94,7 +90,7 @@ async function settleIdle(): Promise<void> {
   if (!browser || !context) return;
   if (liveRecordName()) return;
   const prev = browser.raw.commandTimeoutMs;
-  browser.raw.commandTimeoutMs = HARD_PROBE_MS;
+  browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
   try {
     await context.detachAllPages().catch(warnCatch("detachAllPages"));
     await setPageAutoAttach(browser.raw, false);
@@ -134,19 +130,19 @@ async function handleOp(req: SessionRequest): Promise<SessionResponse> {
           error: `record ${rec} 仍在进行；请先 record stop 或 abort，再 run`,
         };
       }
-      if (!req.filename) return { id, ok: false, error: "run 需要 filename" };
+      if (!req.file) return { id, ok: false, error: "run 需要 file" };
       runBusy = true;
       try {
-        logger.info(`run ${req.filename}`, { op: "run", id });
+        logger.info(`run ${req.file}`, { op: "run", id });
         await setIgnoreCertificateErrors(browser!.raw, true);
         const text = await runTask(
           browser!,
           context!,
-          req.filename,
+          req.file,
           req.argsText,
           req.timeoutMs ?? CDP_COMMAND_TIMEOUT_MS,
         );
-        return { id, ok: true, text, ...pingBody() };
+        return { id, ok: true, text };
       } finally {
         runBusy = false;
         await settleIdle();
@@ -162,9 +158,8 @@ async function handleOp(req: SessionRequest): Promise<SessionResponse> {
         await setIgnoreCertificateErrors(browser!.raw, true);
         const text = await startRecord(browser!, context!, {
           name: req.name,
-          goal: req.goal,
         });
-        return { id, ok: true, text, ...pingBody() };
+        return { id, ok: true, text };
       } catch (error) {
         await finishRecord("abort").catch(warnCatch("record start abort"));
         throw error;
@@ -179,7 +174,7 @@ async function handleOp(req: SessionRequest): Promise<SessionResponse> {
       try {
         logger.info("record stop", { op: req.op, id });
         const text = await finishRecord("stop");
-        return { id, ok: true, text, ...pingBody() };
+        return { id, ok: true, text };
       } finally {
         recordBusy = false;
         await settleIdle();
@@ -191,7 +186,7 @@ async function handleOp(req: SessionRequest): Promise<SessionResponse> {
       try {
         logger.info("record abort", { op: req.op, id });
         const text = await finishRecord("abort");
-        return { id, ok: true, text, ...pingBody() };
+        return { id, ok: true, text };
       } finally {
         recordBusy = false;
         await settleIdle();
@@ -293,7 +288,6 @@ export async function runHolder(): Promise<void> {
                 ok: false,
                 status,
                 guide: HANDSHAKE_GUIDES[status],
-                phase: phaseOf(req.op),
               })}\n`,
             );
             return;

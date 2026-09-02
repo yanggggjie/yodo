@@ -1,5 +1,5 @@
 /**
- * YodoUrl helpers for task scripts (mirror src/core/url.ts).
+ * YodoUrl helpers for scripts (mirror src/utils/url.ts).
  *
  *   import { parseUrl, serializeUrl } from "./_common/url.js";
  */

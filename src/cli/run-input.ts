@@ -1,14 +1,13 @@
-/** yodo run 入参解析：支持位置参数或 --filename，可选 JSON 参数 / 参数文件。 */
+/** yodo run 入参解析：位置参数文件，可选 JSON 参数 / 参数文件。 */
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RUN_TIMEOUT_SEC_MAX, RUN_TIMEOUT_SEC_MIN } from "../utils/constants.js";
 
 export const RUN_USAGE =
-  "用法：yodo run <file> [--args='{\"q\":\"…\"}' | --args-file=<path>] [--timeout=<15-60>]\n" +
-  "兼容：yodo run --filename=<file> [--args='{\"q\":\"…\"}' | --args-file=<path>] [--timeout=<15-60>]";
+  "用法：yodo run <file> [--args='{\"q\":\"…\"}' | --args-file=<path>] [--timeout=<15-60>]";
 
-export type RunTarget = { filename: string; argsText?: string; timeoutSec: number };
+export type RunTarget = { file: string; argsText?: string; timeoutSec: number };
 
 function expandHome(value: string): string {
   if (value === "~") return process.env.HOME ?? value;
@@ -35,7 +34,6 @@ export function parseTimeoutSec(raw: string | undefined): number {
 
 export function resolveRunTarget(args: string[]): RunTarget {
   let values: {
-    filename?: string;
     args?: string;
     "args-file"?: string;
     timeout?: string;
@@ -46,7 +44,6 @@ export function resolveRunTarget(args: string[]): RunTarget {
     const parsed = parseArgs({
       args,
       options: {
-        filename: { type: "string" },
         args: { type: "string" },
         "args-file": { type: "string" },
         timeout: { type: "string" },
@@ -65,14 +62,14 @@ export function resolveRunTarget(args: string[]): RunTarget {
     throw new Error(`run 最多接受一个目标文件位置参数；${RUN_USAGE}`);
   }
 
-  const rawFilename = values.filename ?? positionals[0];
-  if (!rawFilename || !rawFilename.trim()) {
+  const rawFile = positionals[0];
+  if (!rawFile || !rawFile.trim()) {
     throw new Error(`缺少目标文件；${RUN_USAGE}`);
   }
 
-  const filename = resolve(expandHome(rawFilename.trim()));
-  if (!existsSync(filename)) {
-    throw new Error(`找不到脚本：${filename}`);
+  const file = resolve(expandHome(rawFile.trim()));
+  if (!existsSync(file)) {
+    throw new Error(`找不到脚本：${file}`);
   }
 
   const argsText = values.args;
@@ -87,7 +84,7 @@ export function resolveRunTarget(args: string[]): RunTarget {
     if (!argsText.trim()) {
       throw new Error(`--args 是空的；${RUN_USAGE}`);
     }
-    return { filename, argsText, timeoutSec };
+    return { file, argsText, timeoutSec };
   }
 
   if (argsFile !== undefined) {
@@ -102,8 +99,8 @@ export function resolveRunTarget(args: string[]): RunTarget {
     if (!content.trim()) {
       throw new Error(`参数文件为空：${resolvedArgsFile}`);
     }
-    return { filename, argsText: content, timeoutSec };
+    return { file, argsText: content, timeoutSec };
   }
 
-  return { filename, timeoutSec };
+  return { file, timeoutSec };
 }

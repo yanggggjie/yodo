@@ -73,7 +73,7 @@ const raw: RawCdpConnection = {
 };
 const recTracker = new RecordWindowTracker();
 recTracker.initWindow("born", 1);
-const store = new ActiveRecordStore("selfcheck", undefined, Date.now(), "/tmp");
+const store = new ActiveRecordStore("selfcheck", Date.now(), "/tmp");
 const rec = await startCdpNetworkRecorder(raw, store, recTracker);
 assert.ok(sent.some((s) => s.method === "Target.setDiscoverTargets" && s.params?.discover === true));
 assert.ok(!sent.some((s) => s.method === "Target.setAutoAttach" && s.params?.autoAttach === true));
@@ -131,6 +131,8 @@ assert.ok(
 const late = store.events.find((e) => isRawRequest(e) && e.late === true);
 assert.ok(late && isRawRequest(late));
 assert.equal(late.url.bareUrl, "https://z.com/");
+assert.equal(late.method, undefined);
+assert.equal(late.status, undefined);
 
 sent.length = 0;
 created({
@@ -262,7 +264,7 @@ assert.ok(!sent.some((s) => s.method === "Network.enable"));
   };
   const trackerOnce = new RecordWindowTracker();
   trackerOnce.initWindow("ours", 1);
-  const storeOnce = new ActiveRecordStore("once", undefined, Date.now(), "/tmp");
+  const storeOnce = new ActiveRecordStore("once", Date.now(), "/tmp");
   const recOnce = await startCdpNetworkRecorder(rawOnce, storeOnce, trackerOnce);
   const attachOnce = handlersOnce.get("Target.attachedToTarget");
   assert.ok(attachOnce);
@@ -310,7 +312,7 @@ assert.ok(!sent.some((s) => s.method === "Network.enable"));
   };
   const trackerBind = new RecordWindowTracker();
   trackerBind.initWindow("ours", 1);
-  const storeBind = new ActiveRecordStore("bind", undefined, Date.now(), "/tmp");
+  const storeBind = new ActiveRecordStore("bind", Date.now(), "/tmp");
   const inject = startInjectEvents(
     rawBind,
     storeBind,

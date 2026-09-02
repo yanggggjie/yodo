@@ -1,21 +1,20 @@
 /**
- * yodo run：在已有 Browser / BrowserContext 上跑任务脚本；不断开 CDP。
+ * yodo run：在已有 Browser / BrowserContext 上跑脚本；不断开 CDP。
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { register } from "node:module";
-import type { CdpBrowser, CdpContext, CdpPage } from "../browser/index.js";
+import type { CdpBrowser, CdpContext } from "../browser/index.js";
 import { timeoutReject } from "../utils/async.js";
-import { CDP_COMMAND_TIMEOUT_MS, HARD_PROBE_MS } from "../utils/constants.js";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS } from "../utils/constants.js";
 import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger("exec");
 const MAX_STDOUT_BYTES = 8 * 1024;
 
 type TaskScript = (api: {
-  browser: CdpBrowser;
   browserContext: CdpContext;
   args?: unknown;
 }) => Promise<unknown> | unknown;
@@ -68,48 +67,10 @@ export async function loadTaskScript(abs: string): Promise<TaskScript> {
   if (!isTaskScript(script)) {
     throw new Error(
       `脚本须 default export 一个 async 函数：\n` +
-        `export default async ({ browser, browserContext }) => { … }`,
+        `export default async ({ browserContext, args }) => { … }`,
     );
   }
   return script;
-}
-
-async function pagesSnapshot(
-  ctx: CdpContext,
-  before: Set<string>,
-): Promise<string[]> {
-  const rows: string[] = [];
-  const live: { url: string; page: CdpPage }[] = [];
-  for (const p of ctx.pages()) {
-    if (p.isClosed()) continue;
-    let url = "";
-    try {
-      url = p.url();
-    } catch {
-      continue;
-    }
-    if (!url || url === "about:blank") continue;
-    if (before.has(url)) continue;
-    live.push({ url, page: p });
-  }
-
-  if (live.length === 0) {
-    return ["  （run 期间没有新开/导航的 page；失败发生在已有 tab 上，见 stack）"];
-  }
-
-  for (const { url, page } of live) {
-    let title = "";
-    try {
-      title = await Promise.race([
-        page.title(),
-        new Promise<string>((r) => setTimeout(() => r(""), 500)),
-      ]);
-    } catch {
-      title = "";
-    }
-    rows.push(title ? `  ${url}\t(${title})` : `  ${url}`);
-  }
-  return rows;
 }
 
 export function formatStack(err: unknown, scriptAbs: string): string[] {
@@ -170,11 +131,8 @@ function logStringify(v: unknown): string {
 }
 
 function runSuccessJson(opts: {
-  script: string;
   scriptAbs: string;
-  durationMs: number;
   result: unknown;
-  logs: string[];
 }): string {
   const resultStr = JSON.stringify(opts.result);
   const resultBytes = resultStr ? Buffer.byteLength(resultStr) : 0;
@@ -184,116 +142,53 @@ function runSuccessJson(opts: {
     const outputFile = path.join(outputDir, "output.json");
     try {
       fs.writeFileSync(outputFile, resultStr, "utf8");
-      return JSON.stringify(
-        {
-          status: "success",
-          script: opts.script,
-          durationMs: opts.durationMs,
-          resultFile: outputFile,
-          resultBytes,
-          ...(opts.logs.length ? { logs: opts.logs } : {}),
-        },
-        null,
-        2,
-      );
+      return JSON.stringify({ status: "success", resultFile: outputFile }, null, 2);
     } catch {
       const fallbackFile = path.join(
         os.tmpdir(),
         `yodo-output-${Date.now()}.json`,
       );
       fs.writeFileSync(fallbackFile, resultStr, "utf8");
-      return JSON.stringify(
-        {
-          status: "success",
-          script: opts.script,
-          durationMs: opts.durationMs,
-          resultFile: fallbackFile,
-          resultBytes,
-          ...(opts.logs.length ? { logs: opts.logs } : {}),
-        },
-        null,
-        2,
-      );
+      return JSON.stringify({ status: "success", resultFile: fallbackFile }, null, 2);
     }
   }
 
-  return JSON.stringify(
-    {
-      status: "success",
-      script: opts.script,
-      durationMs: opts.durationMs,
-      result: opts.result,
-      ...(opts.logs.length ? { logs: opts.logs } : {}),
-    },
-    null,
-    2,
-  );
+  return JSON.stringify({ status: "success", result: opts.result }, null, 2);
 }
 
 function runFailureJson(opts: {
-  script: string;
-  durationMs: number;
   err: unknown;
   scriptAbs: string;
-  logs: string[];
-  pages: string[];
 }): string {
-  const stack =
+  const lines =
     opts.err instanceof Error
       ? formatStack(opts.err, opts.scriptAbs)
       : [String(opts.err)];
-  const name = opts.err instanceof Error ? opts.err.name : "Error";
-  const message =
-    opts.err instanceof Error ? opts.err.message : String(opts.err);
-  return JSON.stringify(
-    {
-      status: "failure",
-      script: opts.script,
-      durationMs: opts.durationMs,
-      error: { name, message, stack },
-      ...(opts.pages.length ? { pages: opts.pages } : {}),
-      ...(opts.logs.length ? { logs: opts.logs } : {}),
-      hint: "禁止使用 DOM 操作替代；若页内 XHR/fetch 5 次试跑均无法获取有效签名，请立即向用户报告「无法重放」。",
-    },
-    null,
-    2,
-  );
+  return JSON.stringify({ status: "failure", error: lines.join("\n") }, null, 2);
 }
 
 export async function runTask(
   browser: CdpBrowser,
   browserContext: CdpContext,
-  filename: string,
+  file: string,
   argsText?: string,
   timeoutMs = CDP_COMMAND_TIMEOUT_MS,
 ): Promise<string> {
-  const abs = path.resolve(filename);
+  const abs = path.resolve(file);
   logger.info(`load ${abs}`);
   const args = parseRunArgs(argsText);
   const script = await loadTaskScript(abs);
 
   const name = path.basename(abs);
   const started = Date.now();
-  const logs: string[] = [];
-
-  const before = new Set<string>();
-  const restore = captureConsole(logs);
+  const restore = captureConsole([]);
   const raw = browser.raw;
   const prevTimeout = raw?.commandTimeoutMs;
   if (raw) raw.commandTimeoutMs = timeoutMs;
   try {
-    for (const p of browserContext.pages()) {
-      if (p.isClosed()) continue;
-      try {
-        before.add(p.url());
-      } catch {
-        /* ignore */
-      }
-    }
     const value = await timeoutReject(
       Promise.resolve(
         script({
-          browser,
           browserContext,
           args,
         }),
@@ -304,26 +199,18 @@ export async function runTask(
     const durationMs = Date.now() - started;
     logger.info(`task ok: ${name} ${durationMs}ms`);
     return runSuccessJson({
-      script: name,
       scriptAbs: abs,
-      durationMs,
       result: value,
-      logs,
     });
   } catch (err) {
     logger.warn(`task failed: ${name}`, err);
-    const pages = await pagesSnapshot(browserContext, before).catch(() => []);
     return runFailureJson({
-      script: name,
-      durationMs: Date.now() - started,
       err,
       scriptAbs: abs,
-      logs,
-      pages,
     });
   } finally {
     restore();
-    if (raw) raw.commandTimeoutMs = HARD_PROBE_MS;
+    if (raw) raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
     await browserContext.detachAllPages().catch((err) => {
       logger.warn("detachAllPages", err);
     });

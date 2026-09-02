@@ -11,7 +11,7 @@ import { handshakeStatusFromError } from "../protocol.js";
 
 assert.equal(typeof chromeInstalled(), "boolean");
 
-assert.equal(resolveLaunchPlan(false, false), "need-install");
+assert.equal(resolveLaunchPlan(false, false), null);
 assert.equal(resolveLaunchPlan(true, false), "launch");
 assert.equal(resolveLaunchPlan(true, true), "connect");
 assert.equal(resolveLaunchPlan(false, true), "connect");

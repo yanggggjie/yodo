@@ -4,7 +4,7 @@
  */
 import { NeedAllowError, resolveWsEndpoint } from "./connect.js";
 import { timeoutReject } from "../utils/async.js";
-import { CDP_COMMAND_TIMEOUT_MS, HARD_PROBE_MS } from "../utils/constants.js";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS } from "../utils/constants.js";
 import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger("browser");
@@ -428,7 +428,7 @@ export class CdpPage {
 
   async goto(
     url: string,
-    options?: { waitUntil?: "domcontentloaded" | "load"; timeout?: number },
+    options?: { timeout?: number },
   ): Promise<void> {
     if (this.closed) throw new Error("Target is closed");
     const timeoutMs = options?.timeout ?? this.raw.commandTimeoutMs;
@@ -595,6 +595,7 @@ export class CdpContext {
     await setPageAutoAttach(this.raw, false);
   }
 
+  /** 已有同 origin 的 page 就复用；找不到就打开。 */
   async pageForOrigin(origin: string): Promise<CdpPage> {
     const want = new URL(origin).origin;
     for (const p of this.pages()) {
@@ -626,7 +627,7 @@ export class CdpContext {
       }
     }
     const page = await this.newPage();
-    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    await page.goto(origin);
     return page;
   }
 
@@ -751,7 +752,7 @@ export async function connectChrome(): Promise<{
   const browser = new CdpBrowser(raw, context);
 
   try {
-    await timeoutReject(raw.send("Target.getTargets"), HARD_PROBE_MS, "hardProbe");
+    await timeoutReject(raw.send("Target.getTargets"), CDP_SHORT_TIMEOUT_MS, "attach");
   } catch (e) {
     await disconnectChrome(browser);
     throw e;

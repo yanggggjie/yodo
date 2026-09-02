@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   HANDSHAKE_GUIDES,
   HANDSHAKE_MARKS,
+  formatErrorStdout,
   formatHandshakeStdout,
   handshakeStatusFromError,
   handshakeStatusFromMark,
@@ -46,19 +47,18 @@ assert.equal(
 );
 assert.equal(handshakeStatusFromError(new Error("stack")), null);
 
-const stdout = formatHandshakeStdout("need-allow", "record");
+const stdout = formatHandshakeStdout("need-allow");
 const parsed = JSON.parse(stdout) as {
   status: string;
-  phase: string;
   guide: string;
 };
 assert.equal(parsed.status, "need-allow");
-assert.equal(parsed.phase, "record");
 assert.equal(parsed.guide, HANDSHAKE_GUIDES["need-allow"]);
-assert.deepEqual(Object.keys(parsed).sort(), ["guide", "phase", "status"]);
+assert.deepEqual(Object.keys(parsed).sort(), ["guide", "status"]);
 
-const installOut = formatHandshakeStdout("need-install", "run");
+const installOut = formatHandshakeStdout("need-install");
 assert.match(installOut, /"status": "need-install"/);
-assert.match(installOut, /"phase": "run"/);
+assert.doesNotMatch(installOut, /phase/);
+assert.equal(formatErrorStdout("boom"), '{"error":"boom"}');
 
 console.log("protocol selfcheck ok");

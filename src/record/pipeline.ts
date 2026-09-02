@@ -17,8 +17,7 @@ let enginePromise: Promise<FiltersEngine> | undefined;
 function filterType(kind: RequestKind): RequestType {
   if (kind === "document") return "main_frame";
   if (kind === "xhr") return "xmlhttprequest";
-  if (kind === "fetch") return "fetch";
-  return "other";
+  return "fetch";
 }
 
 export async function loadAdblockEngine(): Promise<FiltersEngine> {
@@ -281,6 +280,7 @@ export function sanitizeEvent(entry: RawEvent, sanitizer: RecordSanitizer): RawE
 export function filterSuccessOnly(timeline: RawEvent[]): RawEvent[] {
   return timeline.filter((entry) => {
     if (isRawAction(entry)) return true;
+    if (entry.late) return true;
     return typeof entry.status === "number" && entry.status >= 200 && entry.status < 300;
   });
 }
@@ -292,10 +292,10 @@ export function filterAdblock(
   return timeline.filter((entry) => {
     if (isRawAction(entry)) return true;
     if (entry.requestType === "mainDoc" || entry.requestType === "doc") return true;
-    const kind = entry.requestType === "xhr" ? "xhr" : entry.requestType === "fetch" ? "fetch" : "other";
+    const kind: RequestKind = entry.requestType === "xhr" ? "xhr" : "fetch";
     return !shouldSkipRecordUrl(
       entry.url.bareUrl,
-      kind as RequestKind,
+      kind,
       entry.frameUrl.bareUrl,
       loaded,
     );

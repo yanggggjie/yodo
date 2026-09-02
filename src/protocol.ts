@@ -11,13 +11,21 @@ export type HandshakeStatus =
   | "need-remote-debugging"
   | "need-allow";
 
+export type StdoutStatus =
+  | HandshakeStatus
+  | "recording"
+  | "stopped"
+  | "aborted"
+  | "idle"
+  | "success"
+  | "failure";
+
 export type SessionRequest = {
   id: string;
   op: SessionOp;
-  filename?: string;
+  file?: string;
   argsText?: string;
   name?: string;
-  goal?: string;
   /** run only；毫秒。CLI 已校验 15～60 秒。 */
   timeoutMs?: number;
 };
@@ -27,9 +35,8 @@ export type SessionResponse = {
   ok: boolean;
   error?: string;
   text?: string;
-  status?: HandshakeStatus;
+  status?: StdoutStatus;
   guide?: string;
-  phase?: "run" | "record";
   pid?: number;
   chrome?: string;
   pages?: number;
@@ -52,6 +59,10 @@ export const HANDSHAKE_MARKS: Record<HandshakeStatus, string> = {
 };
 
 const STATUSES = Object.keys(HANDSHAKE_MARKS) as HandshakeStatus[];
+
+export function isHandshakeStatus(status: string): status is HandshakeStatus {
+  return status in HANDSHAKE_GUIDES;
+}
 
 export function handshakeStatusFromMark(text: string): HandshakeStatus | null {
   for (const status of STATUSES) {
@@ -79,8 +90,11 @@ export function handshakeStatusFromError(
 
 export function formatHandshakeStdout(
   status: HandshakeStatus,
-  phase: "run" | "record",
   guide = HANDSHAKE_GUIDES[status],
 ): string {
-  return JSON.stringify({ status, phase, guide }, null, 2);
+  return JSON.stringify({ status, guide }, null, 2);
+}
+
+export function formatErrorStdout(error: string): string {
+  return JSON.stringify({ error });
 }

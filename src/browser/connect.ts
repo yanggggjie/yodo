@@ -25,7 +25,8 @@ export class CdpError extends Error {
   }
 }
 
-export type LaunchPlan = "need-install" | "launch" | "connect";
+/** 内部：拉起 Chrome vs 连已有进程。等人的 `need-*` 不在这里。 */
+export type LaunchPlan = "launch" | "connect";
 
 const TOGGLE_PAGE_URL = "chrome://inspect/#remote-debugging";
 const CHROME_LAUNCH_MS = 1_500;
@@ -59,13 +60,13 @@ export class NeedAllowError extends Error {
   }
 }
 
-/** running 优先：已在跑就连，不因标准路径找不到二进制而报未安装。 */
+/** running 优先：已在跑就连。未安装返回 null，调用方抛 NeedInstallError。 */
 export function resolveLaunchPlan(
   installed: boolean,
   running: boolean,
-): LaunchPlan {
+): LaunchPlan | null {
   if (running) return "connect";
-  if (!installed) return "need-install";
+  if (!installed) return null;
   return "launch";
 }
 
@@ -327,7 +328,7 @@ function openRemoteDebuggingPage(): void {
 /** 没开 Chrome 就拉起；按层失败，开关页只在 remote-debugging 层打开。 */
 export async function resolveWsEndpoint(): Promise<string> {
   const plan = resolveLaunchPlan(chromeInstalled(), chromeRunning());
-  if (plan === "need-install") throw new NeedInstallError();
+  if (plan === null) throw new NeedInstallError();
   if (plan === "launch") {
     openChromeApp();
     await sleep(CHROME_LAUNCH_MS);

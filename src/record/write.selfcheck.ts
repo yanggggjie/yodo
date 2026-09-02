@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseUrl } from "../utils/url.js";
 import { processTimelinePipeline } from "./pipeline.js";
-import { writeArtifacts } from "./write.js";
+import { formatRecordStartStdout, writeArtifacts } from "./write.js";
 import type { RawEvent, RawRequest } from "./types.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-write-"));
@@ -13,11 +13,9 @@ const doc: RawRequest = {
   id: "request_001",
   mainFrame: true,
   requestType: "mainDoc",
-  method: "GET",
   url: parseUrl("https://example.com/"),
   frameUrl: parseUrl("https://example.com/"),
   headers: {},
-  status: 200,
   requestBody: null,
   responseBody: null,
   startedAt: 1000,
@@ -67,6 +65,21 @@ const clickXhr: RawRequest = {
   startedAt: 1300,
   endedAt: 1350,
 };
+const largeXhr: RawRequest = {
+  id: "request_004",
+  mainFrame: false,
+  requestType: "xhr",
+  method: "GET",
+  url: parseUrl("https://example.com/big"),
+  frameUrl: parseUrl("https://example.com/"),
+  headers: {},
+  responseHeaders: { "content-type": "application/json" },
+  status: 200,
+  requestBody: null,
+  responseBody: { payload: "x".repeat(2000) },
+  startedAt: 1500,
+  endedAt: 1550,
+};
 
 const raw: RawEvent[] = [
   doc,
@@ -87,6 +100,7 @@ const raw: RawEvent[] = [
     startedAt: 1400,
     frameUrl: parseUrl("https://example.com/"),
   },
+  largeXhr,
 ];
 fs.writeFileSync(
   path.join(dir, "request_001.response.html"),
@@ -96,32 +110,48 @@ fs.writeFileSync(
 const processed = processTimelinePipeline(raw);
 const a = await writeArtifacts(dir, processed, "demo");
 assert.equal(a.name, "demo");
-assert.equal(a.requestsCount, 3);
 
 const processed2 = processTimelinePipeline(raw);
 assert.deepEqual(processed, processed2);
 
 const lines = fs
-  .readFileSync(a.timelineFile, "utf8")
+  .readFileSync(path.join(dir, "timeline.jsonl"), "utf8")
   .trim()
   .split("\n")
   .map((l) => JSON.parse(l));
-assert.equal(lines.length, 5);
+assert.equal(lines.length, 6);
 assert.equal(lines[0].type, "request");
 assert.equal(lines[0].requestType, "mainDoc");
-assert.equal(lines[0].file, "01_GET_example.com.json");
+assert.equal(lines[0].file, "01_late_example.com.json");
+assert.equal(lines[0].method, undefined);
 assert.equal(lines[0].status, undefined);
 assert.equal(lines[0].frameUrl, undefined);
 assert.equal(lines[2].type, "action");
 assert.equal(lines[2].actionType, "click");
 
-assert.ok(fs.existsSync(path.join(dir, "01_GET_example.com.response.html")));
-const req1 = JSON.parse(fs.readFileSync(path.join(dir, "01_GET_example.com.json"), "utf8"));
-assert.equal(req1.method, "GET");
-assert.equal(req1.status, 200);
+assert.ok(fs.existsSync(path.join(dir, "01_late_example.com.response.html")));
+const req1 = JSON.parse(fs.readFileSync(path.join(dir, "01_late_example.com.json"), "utf8"));
+assert.equal(req1.method, undefined);
+assert.equal(req1.status, undefined);
 assert.equal(req1.late, true);
 assert.equal(req1.id, undefined);
-assert.equal(req1.responseBodyPath, "01_GET_example.com.response.html");
+assert.equal(req1.responseBodyPath, "01_late_example.com.response.html");
+assert.equal(req1.responseBody, undefined);
+
+const req2 = JSON.parse(fs.readFileSync(path.join(dir, "02_POST_example.com_api.json"), "utf8"));
+assert.deepEqual(req2.responseBody, { ok: true });
+assert.equal(req2.responseBodyPath, undefined);
+
+assert.ok(fs.existsSync(path.join(dir, "04_GET_example.com_big.response.json")));
+const req4 = JSON.parse(fs.readFileSync(path.join(dir, "04_GET_example.com_big.json"), "utf8"));
+assert.equal(req4.responseBodyPath, "04_GET_example.com_big.response.json");
+assert.equal(req4.responseBody, undefined);
+
+const recording = JSON.parse(formatRecordStartStdout("demo")) as Record<string, unknown>;
+assert.equal(recording.status, "recording");
+assert.equal(recording.name, "demo");
+assert.equal(typeof recording.guide, "string");
+assert.equal(recording.recordDir, undefined);
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log("record write selfcheck ok");

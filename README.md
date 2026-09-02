@@ -1,21 +1,22 @@
 # yodo
 
-**You Only Do Once**：用户演示一次，Agent 读抓包沉淀为任务脚本（task），之后全自动执行（run）。
+用本机已登录的 Chrome 做成用户目标：能跑 `task/` 就 `yodo run <task>`；没有就 `record`，读抓包，`yodo run <tmp>`，`success` 后 `mv` 再 `yodo run <task>`。
+
+`yodo run` 成功后报告结果：做了什么，并给一个能核对的 URL。
 
 ```mermaid
 flowchart TD
-    Start([用户目标]) --> Find{查找能力}
-
-    Find -->|已有 task| Run([yodo run 执行])
-    Find -->|可组合| Draft[tmp/ 编写与演练]
-
-    Find -->|无能力| Record[yodo record 演示录制]
-    Record --> Learn[读抓包分析]
-    Learn --> Draft
-
-    Draft -->|验证通过| Promote[mv 晋级到 task/] --> Run
-    Draft -->|5 次试跑未通| Exit([输出诊断报告 / 优雅退出])
+    Goal([用户目标]) --> Find{查 task/}
+    Find -->|有| RunTask[yodo run task]
+    Find -->|没有| Record[record]
+    Record --> Read[读抓包]
+    Read --> RunTmp[yodo run tmp]
+    RunTmp -->|success| Mv[mv] --> RunTask
+    RunTmp -->|5 次 failure| Stop([停，写原因])
+    RunTask --> Report[报告结果]
 ```
+
+Agent 流程见 `skills/yodo/SKILL.md`。
 
 ---
 
@@ -25,7 +26,7 @@ flowchart TD
 npx -y yodo-cli@latest init
 ```
 
-本地开发调试：
+本地开发：
 
 ```bash
 npm run dev:install
@@ -33,11 +34,11 @@ npm run dev:install
 
 ---
 
-## CLI 命令
+## CLI
 
 ```text
-yodo init [--local]
-yodo record start [name] [--goal="..."]
+yodo init
+yodo record start [name]
 yodo record stop
 yodo record abort
 yodo run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
@@ -45,51 +46,35 @@ yodo run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
 
 ---
 
-## 数据目录结构（`~/.yodo/`）
+## `~/.yodo/`
 
 ```text
 ~/.yodo/
-├── session/                                 # [会话管理]
-│   ├── session.sock                         # Unix domain socket
-│   ├── session.pid                          # Holder 进程 PID
-│   └── log.jsonl                            # session JSONL（handshake / op / CDP 失败）
-├── task/                                    # [能力资产] 纯单文件 ESM
-│   ├── _common/                             # 通用辅助模块（pageForOrigin, url 等）
-│   │   ├── page-for-origin.js
-│   │   └── url.js
-│   ├── github-star-repo.js                  # 单文件 Task（JSDoc 注释）
-│   └── v2ex-daily-checkin.js
-├── tmp/                                     # [演练场] Agent 编写并验证脚本的临时目录
-│   ├── probe_star.js
-│   └── probe_input.json                     # 测试入参
-└── record/                                  # [录制归档] 扁平清晰的抓包文件
-    └── rec-20260827T080000Z/
-        ├── timeline.jsonl                   # 单行时序流（手势与网络简报）
-        ├── 01_GET_github.com_login.json     # 包含完整的 request 与 response
-        ├── 01_GET_github.com_login.response.html # 大 HTML 单独落盘
-        ├── 02_POST_api.github.com_graphql.json
-        └── audit.log                        # 广告拦截审计记录
+├── session/     # CDP 连接的 pid · sock · log
+├── task/        # 已验证脚本
+│   └── _common/
+├── tmp/         # 未验证脚本
+└── record/      # 抓包
+    └── <name>/
+        ├── timeline.jsonl
+        ├── 01_GET_host_path.json
+        ├── 01_GET_host_path.response.json
+        └── 01_GET_host_path.response.html
 ```
 
 ---
 
-## 最小使用流程
+## 最小用法
 
 ```bash
-# 1. 查找现有 task：若已有匹配，直接执行
 yodo run ~/.yodo/task/github-star-repo.js --args='{"repo":"owner/repo"}'
 
-# 2. 若无能力：开始录制
-yodo record start my-action --goal="演示特定业务操作"
-
-# 3. 在弹出的专属新窗口中操作，完成后告知「好了」
+yodo record start my-action
+# 在新窗口做一遍，回「好了」
 yodo record stop
 
-# 4. 分析 ~/.yodo/record/my-action/ 下的 timeline.jsonl 与抓包文件，在 tmp/ 下编写试跑脚本
-yodo run ~/.yodo/tmp/probe.js --args-file=~/.yodo/tmp/input.json
+# 读 ~/.yodo/record/my-action/，在 tmp/ 写脚本
+yodo run ~/.yodo/tmp/my-action.js
 
-# 5. 验证通过后移入 task/
-mv ~/.yodo/tmp/probe.js ~/.yodo/task/my-action.js
+mv ~/.yodo/tmp/my-action.js ~/.yodo/task/my-action.js
 ```
-
-详见 `skills/yodo/SKILL.md`。

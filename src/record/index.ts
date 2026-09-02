@@ -47,13 +47,6 @@ function generatedName(): string {
   return `rec-${nowId()}`;
 }
 
-function normalizeGoal(goal?: string): string | undefined {
-  const value = goal?.trim();
-  if (!value) return undefined;
-  if (value.length > 500) throw new Error("--goal 最多 500 个字符");
-  return value;
-}
-
 function clearMaxTimer(): void {
   if (maxTimer) {
     clearTimeout(maxTimer);
@@ -82,16 +75,15 @@ export function liveRecordName(): string | null {
 export async function startRecord(
   browser: CdpBrowser,
   _context: CdpContext,
-  options: { name?: string; goal?: string },
+  options: { name?: string },
 ): Promise<string> {
   if (active) throw new Error(`record ${active.name} 仍在进行`);
   ensureHomeLayout();
   await sweepDeadActive();
   const name = validateRecordName(options.name?.trim() || generatedName());
-  const goal = normalizeGoal(options.goal);
   await claimActive(name);
   const recordDir = path.join(ACTIVE_RECORD_DIR, name);
-  active = new ActiveRecordStore(name, goal, Date.now(), recordDir);
+  active = new ActiveRecordStore(name, Date.now(), recordDir);
   const tracker = new RecordWindowTracker();
   windowTracker = tracker;
   recordRaw = browser.raw;
@@ -139,7 +131,7 @@ export async function startRecord(
     maxTimer.unref?.();
 
     logger.info(`recording ${name}`);
-    return formatRecordStartStdout(recordDir, active.name);
+    return formatRecordStartStdout(active.name);
   } catch (error) {
     await stopRecorders().catch(() => {});
     await closeRecordWindows().catch(() => {});
@@ -186,8 +178,7 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
     fs.renameSync(current.recordDir, finalDir);
     await releaseActive(current.name);
     flushResult.recordDir = finalDir;
-    flushResult.timelineFile = path.join(finalDir, "timeline.jsonl");
-    logger.info(`archived ${current.name} requests=${flushResult.requestsCount}`);
+    logger.info(`archived ${current.name}`);
     current.events.length = 0;
     return formatStopStdout(flushResult);
   } catch (error) {
@@ -195,7 +186,7 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
       await releaseActive(current.name).catch(() => {});
       logger.warn(`disconnect flush failed for ${current.name}`, error);
       return JSON.stringify(
-        { status: "interrupted", name: current.name },
+        { status: "aborted", name: current.name },
         null,
         2,
       );

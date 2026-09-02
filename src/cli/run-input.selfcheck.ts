@@ -9,32 +9,17 @@ const script = join(dir, "t.js");
 writeFileSync(script, "export default async () => 1\n");
 
 const argsFile = join(dir, "input.json");
-writeFileSync(argsFile, '{"q":"test"}\n');
+writeFileSync(argsFile, `${JSON.stringify({ q: "test" })}\n`);
 
-assert.deepEqual(resolveRunTarget([script]), { filename: script, timeoutSec: 15 });
-assert.deepEqual(resolveRunTarget([script, '--args={"a":1}']), {
-  filename: script,
+assert.deepEqual(resolveRunTarget([script]), { file: script, timeoutSec: 15 });
+assert.deepEqual(resolveRunTarget([script, "--args={\"a\":1}"]), {
+  file: script,
   argsText: '{"a":1}',
   timeoutSec: 15,
 });
 assert.deepEqual(resolveRunTarget([script, `--args-file=${argsFile}`]), {
-  filename: script,
-  argsText: '{"q":"test"}\n',
-  timeoutSec: 15,
-});
-
-assert.deepEqual(resolveRunTarget([`--filename=${script}`]), {
-  filename: script,
-  timeoutSec: 15,
-});
-assert.deepEqual(resolveRunTarget(["--filename", script, '--args={"a":1}']), {
-  filename: script,
-  argsText: '{"a":1}',
-  timeoutSec: 15,
-});
-assert.deepEqual(resolveRunTarget(["--filename", script, `--args-file=${argsFile}`]), {
-  filename: script,
-  argsText: '{"q":"test"}\n',
+  file: script,
+  argsText: `${JSON.stringify({ q: "test" })}\n`,
   timeoutSec: 15,
 });
 assert.equal(resolveRunTarget([script, "--timeout=60"]).timeoutSec, 60);
@@ -46,15 +31,16 @@ for (const bad of [
   ["--js=x"],
   ["--args-file=/nope/nonexistent.json"],
   ["/nope/nonexistent.js"],
-  ["--filename=/nope/nope.js"],
-  [`--filename=${script}`, "--args="],
-  [`--filename=${script}`, "--args-file="],
-  [`--filename=${script}`, '--args={"a":1}', `--args-file=${argsFile}`],
-  [`--filename=${script}`, "--secret=abc"],
-  [`--filename=${script}`, "--timeout=14"],
-  [`--filename=${script}`, "--timeout=61"],
-  [`--filename=${script}`, "--timeout=15.5"],
-  [`--filename=${script}`, "--timeout=abc"],
+  [`--filename=${script}`],
+  [script, "--args="],
+  [script, "--args-file="],
+  [script, "--args={\"a\":1}", `--args-file=${argsFile}`],
+  [script, "--secret=abc"],
+  [script, "--timeout=14"],
+  [script, "--timeout=61"],
+  [script, "--timeout=15.5"],
+  [script, "--timeout=abc"],
+  [script, "--goal=x"],
   [script, script],
 ]) {
   assert.throws(() => resolveRunTarget(bad), `应拒绝：${JSON.stringify(bad)}`);

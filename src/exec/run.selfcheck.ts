@@ -38,9 +38,8 @@ fs.writeFileSync(
   };`,
 );
 const largeOut = await runTask(mockBrowser, mockContext, largeScript);
-const largeParsed = JSON.parse(largeOut) as { status: string; resultFile: string; resultBytes: number };
+const largeParsed = JSON.parse(largeOut) as { status: string; resultFile: string };
 assert.equal(largeParsed.status, "success");
-assert.ok(largeParsed.resultBytes > 8192);
 assert.ok(fs.existsSync(largeParsed.resultFile));
 
 const errorScript = path.join(tmpDir, "error.js");
@@ -49,9 +48,9 @@ fs.writeFileSync(
   `export default async () => { throw new Error("something went wrong"); };`,
 );
 const errorOut = await runTask(mockBrowser, mockContext, errorScript);
-const errorParsed = JSON.parse(errorOut) as { status: string; error: { message: string } };
+const errorParsed = JSON.parse(errorOut) as { status: string; error: string };
 assert.equal(errorParsed.status, "failure");
-assert.equal(errorParsed.error.message, "something went wrong");
+assert.match(errorParsed.error, /something went wrong/);
 
 const slowScript = path.join(tmpDir, "slow.js");
 fs.writeFileSync(
@@ -59,9 +58,9 @@ fs.writeFileSync(
   `export default async () => { await new Promise((r) => setTimeout(r, 200)); return 1; };`,
 );
 const slowOut = await runTask(mockBrowser, mockContext, slowScript, undefined, 50);
-const slowParsed = JSON.parse(slowOut) as { status: string; error: { message: string } };
+const slowParsed = JSON.parse(slowOut) as { status: string; error: string };
 assert.equal(slowParsed.status, "failure");
-assert.match(slowParsed.error.message, /timeout/);
+assert.match(slowParsed.error, /timeout/);
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log("exec run selfcheck ok");

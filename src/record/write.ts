@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { RESPONSE_SPLIT_BYTES } from "../utils/constants.js";
 import { writeJsonAtomic, exists } from "../utils/fs.js";
 import type {
   RawEvent,
@@ -15,7 +16,7 @@ export function sanitizeFileNamePart(str: string): string {
 
 export function semanticRequestBaseName(seq: number, request: RawRequest): string {
   const seqStr = String(seq).padStart(2, "0");
-  const method = (request.method || "GET").toUpperCase();
+  const method = request.late ? "late" : (request.method || "GET").toUpperCase();
   let host = "unknown";
   let pathname = "";
   try {
@@ -31,7 +32,8 @@ export function semanticRequestBaseName(seq: number, request: RawRequest): strin
 
 export function cleanRequestJson(request: RawRequest): Record<string, unknown> {
   return {
-    method: request.method,
+    ...(request.late ? { late: true } : {}),
+    ...(request.late || !request.method ? {} : { method: request.method }),
     url: request.url,
     frameUrl: request.frameUrl,
     headers: request.headers,
@@ -41,17 +43,17 @@ export function cleanRequestJson(request: RawRequest): Record<string, unknown> {
     ...(request.requestBodyUnavailableReason
       ? { requestBodyUnavailableReason: request.requestBodyUnavailableReason }
       : {}),
-    status: request.status ?? null,
+    ...(request.late ? {} : { status: request.status ?? null }),
     ...(request.responseHeaders ? { responseHeaders: request.responseHeaders } : {}),
-    ...(request.responseBody !== null && request.responseBody !== undefined
-      ? { responseBody: request.responseBody }
-      : {}),
-    ...(request.responseBodyPath ? { responseBodyPath: request.responseBodyPath } : {}),
+    ...(request.responseBodyPath
+      ? { responseBodyPath: request.responseBodyPath }
+      : request.responseBody !== null && request.responseBody !== undefined
+        ? { responseBody: request.responseBody }
+        : {}),
     ...(request.responseBodyUnavailableReason
       ? { responseBodyUnavailableReason: request.responseBodyUnavailableReason }
       : {}),
     ...(request.errorText ? { errorText: request.errorText } : {}),
-    ...(request.late ? { late: true } : {}),
     startedAt: request.startedAt,
     ...(request.endedAt != null ? { endedAt: request.endedAt } : {}),
   };
@@ -64,23 +66,45 @@ export async function writeSemanticRequestFile(
 ): Promise<string> {
   const baseName = semanticRequestBaseName(seq, request);
   let responseBodyPath = request.responseBodyPath;
+  let responseBody = request.responseBody;
+
+  if (!responseBodyPath && responseBody !== null && responseBody !== undefined) {
+    const raw =
+      typeof responseBody === "string" ? responseBody : JSON.stringify(responseBody);
+    if (Buffer.byteLength(raw) > RESPONSE_SPLIT_BYTES) {
+      const html =
+        request.requestType === "mainDoc" || request.requestType === "doc";
+      const ext = html ? ".html" : ".json";
+      const peeled = `${baseName}.response${ext}`;
+      await fs.writeFile(path.join(recordDir, peeled), raw, "utf8");
+      responseBodyPath = peeled;
+      responseBody = null;
+    }
+  }
 
   if (responseBodyPath) {
-    const oldHtmlPath = path.join(recordDir, responseBodyPath);
-    const newHtmlName = `${baseName}.response.html`;
-    const newHtmlPath = path.join(recordDir, newHtmlName);
-    if (await exists(oldHtmlPath)) {
-      if (oldHtmlPath !== newHtmlPath) {
-        await fs.rename(oldHtmlPath, newHtmlPath);
-      }
-      responseBodyPath = newHtmlName;
+    const oldPath = path.join(recordDir, responseBodyPath);
+    const ext = path.extname(responseBodyPath) || ".html";
+    const newName = `${baseName}.response${ext}`;
+    const newPath = path.join(recordDir, newName);
+    if (await exists(oldPath)) {
+      if (oldPath !== newPath) await fs.rename(oldPath, newPath);
+      responseBodyPath = newName;
+    } else if (await exists(newPath)) {
+      responseBodyPath = newName;
+    } else {
+      responseBodyPath = undefined;
     }
   }
 
   const fileName = `${baseName}.json`;
   await writeJsonAtomic(
     path.join(recordDir, fileName),
-    cleanRequestJson({ ...request, ...(responseBodyPath ? { responseBodyPath } : {}) }),
+    cleanRequestJson({
+      ...request,
+      responseBody: responseBodyPath ? null : responseBody,
+      ...(responseBodyPath ? { responseBodyPath } : {}),
+    }),
   );
   return fileName;
 }
@@ -88,8 +112,6 @@ export async function writeSemanticRequestFile(
 export type FlushResult = {
   name: string;
   recordDir: string;
-  requestsCount: number;
-  timelineFile: string;
 };
 
 export async function writeArtifacts(
@@ -117,7 +139,7 @@ export async function writeArtifacts(
         t: entry.startedAt,
         type: "request",
         requestType: entry.requestType,
-        method: entry.method,
+        ...(entry.method ? { method: entry.method } : {}),
         url: entry.url.bareUrl,
         file: fileName,
       };
@@ -125,19 +147,13 @@ export async function writeArtifacts(
     }
   }
 
-  const timelineFile = path.join(recordDir, "timeline.jsonl");
   await fs.writeFile(
-    timelineFile,
+    path.join(recordDir, "timeline.jsonl"),
     lines.join("\n") + (lines.length > 0 ? "\n" : ""),
     "utf8",
   );
 
-  return {
-    name,
-    recordDir,
-    requestsCount: requestSeq,
-    timelineFile,
-  };
+  return { name, recordDir };
 }
 
 export function formatStopStdout(result: FlushResult): string {
@@ -146,21 +162,17 @@ export function formatStopStdout(result: FlushResult): string {
       status: "stopped",
       name: result.name,
       recordDir: result.recordDir,
-      requestsCount: result.requestsCount,
-      timelineFile: result.timelineFile,
-      hint: "读 timeline.jsonl 找接口。写 tmp/<probe>.js 试跑；优先走页内 XHR 借 SDK 签名；最多尝试 5 次，学不会即止。",
     },
     null,
     2,
   );
 }
 
-export function formatRecordStartStdout(recordDir: string, name: string): string {
+export function formatRecordStartStdout(name: string): string {
   return JSON.stringify(
     {
       status: "recording",
       name,
-      recordDir,
       guide: "请在新窗口做一遍。好了告诉我。",
     },
     null,
