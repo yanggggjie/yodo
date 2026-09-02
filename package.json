@@ -1,6 +1,6 @@
 {
   "name": "yodo-cli",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
   "description": "Use the user's logged-in Chrome to record a site, then run scripts",
   "bin": {
