@@ -7,7 +7,7 @@ description: >-
 
 用 `yodo` 操作用户本机 Chrome（复用已登录态）。命令会自己连。
 有 `guide` → 原样念出，停，等「好了」。
-对人说「用户目标」。`success` 后报告结果：做了什么（用 `result` / `resultFile`），并给一个能核对的 URL。
+对人说「用户目标」。`success` 后报告结果：做了什么（用 `result` / `resultFile`），并念 `result.url`——它直达结果页。
 `task` 只指 `~/.yodo/task/*.js`。
 先看 `~/.yodo/`，再写。目录与命令见文末「文件目录+CLI 设计」。
 
@@ -55,6 +55,8 @@ export default async ({ browserContext, args }) => {
   return page.evaluate(async () => { /* fetch / XHR */ });
 }
 ```
+
+返回 `result.url` = 直达结果页的 URL：`import` `_common/url.js`，`serializeUrl({ bareUrl, query })` 由 args 现拼——`bareUrl` 取抓包里结果页那一发 `mainDoc`/`frameUrl`（不是 `fetch` 端点），`query` 取页面地址栏的那几个键（页面 query，不是 API 全套参数）。页面靠路径的就深链（如 `/pin/<id>`）；API 返回 id 时深链到那一条。
 
 同一接口最多 5 次 `run`（只计有 `status` 的；只有 `error` 不算）。`failure` 且 403 可改页内 XHR 再试。页内太慢就减小数据量，不要加 `--timeout`。
 
