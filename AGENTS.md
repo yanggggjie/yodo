@@ -2,15 +2,34 @@
 
 Agent 流程见 `skills/yodo/SKILL.md`。下面只写实现。
 
-## 开发安装
+## 开发
 
-改 `src/`、`skills/`、`templates/` 或 init 后执行：
+源码在 `skills/yodo/src/`，Node ≥24 直接跑 `.ts`（strip types，无编译产物）。
+
+`setup.js` 把 `~/.yodo/src` **链接**到 skill 源码（Windows 用 junction；建不了链接的环境降级为整目录拷贝），数据目录 `~/.yodo/{task,tmp,record,session}` 独立，更新不碰。
+
+日常开发（快速迭代，`~/.yodo/src` 直接链到 repo 源码）：
 
 ```bash
-npm run dev:install
+node skills/yodo/setup.js                 # ~/.yodo/src → 本 repo 的 skills/yodo/src
+node ~/.yodo/src/yodo.js <record|run|doctor> …
 ```
 
-它 build 后执行本地 `yodo init --local`。开发时不要用线上 `@latest`。`init --local` 只给开发用。
+检查（strip 不做类型检查，类型靠这一步）：
+
+```bash
+npm run check        # tsc --noEmit
+npm test             # 逐个跑 *.selfcheck.ts（含 deploy 的 link/copy 自检）
+npm run verify:pack  # 隔离 HOME 真跑 skills add，断言 payload 完整 + 自足可运行
+```
+
+模拟正式分发：
+
+```bash
+npm run dev:install  # 本地 skills add（把 payload 装进各 agent 的 skills 目录）+ setup
+```
+
+分发：`skills/yodo/` 整个作为 skill payload（含 `src/`、vendored `node_modules`、`setup.js`），`skills add` 递归拷贝整棵目录（只排除 `.git`/`__pycache__` 等，不过滤 `node_modules`）。改运行时依赖：删 `skills/yodo/src/node_modules`，用纯运行时树（`npm install --omit=dev --omit=optional`，确认无 `*.node`）重建。
 
 ---
 

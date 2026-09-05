@@ -22,26 +22,27 @@ Agent 流程见 `skills/yodo/SKILL.md`。
 
 ## 安装
 
-```bash
-npx -y yodo-cli@latest init
-```
-
-本地开发：
+只需 **Node ≥24 + Chrome**。装 skill 后在 skill 目录：
 
 ```bash
-npm run dev:install
+node setup.js   # ~/.yodo/src 链接到 skill 源码（个别环境降级为拷贝），并建数据目录
 ```
+
+本地开发：见 `AGENTS.md`（`npm run dev:install` / `verify:pack`）。
 
 ---
 
-## CLI
+## 命令
+
+`yodo` = `node ~/.yodo/src/yodo.js`（Windows 用绝对路径）：
 
 ```text
-yodo init
-yodo record start [name]
-yodo record stop
-yodo record abort
-yodo run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
+node ~/.yodo/src/yodo.js init
+node ~/.yodo/src/yodo.js doctor
+node ~/.yodo/src/yodo.js record start [name]
+node ~/.yodo/src/yodo.js record stop
+node ~/.yodo/src/yodo.js record abort
+node ~/.yodo/src/yodo.js run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
 ```
 
 ---
@@ -65,6 +66,8 @@ yodo run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
 ---
 
 ## 最小用法
+
+`yodo` = `node ~/.yodo/src/yodo.js`：
 
 ```bash
 yodo run ~/.yodo/task/github-star-repo.js --args='{"repo":"owner/repo"}'

@@ -2,6 +2,8 @@
 .yodo/
 *.har
 node_modules/
+# 例外：vendored 运行时依赖随 payload 分发
+!skills/yodo/src/node_modules/
 dist/
 *.tsbuildinfo
 .env
