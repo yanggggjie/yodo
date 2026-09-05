@@ -1,6 +1,15 @@
 export type SessionOp =
   | "ping"
-  | "run"
+  | "run.begin"
+  | "run.end"
+  | "page.for-origin"
+  | "page.goto"
+  | "page.evaluate"
+  | "page.url"
+  | "page.title"
+  | "page.close"
+  | "page.bring-to-front"
+  | "context.new-page"
   | "record.start"
   | "record.stop"
   | "record.abort";
@@ -23,10 +32,17 @@ export type StdoutStatus =
 export type SessionRequest = {
   id: string;
   op: SessionOp;
-  file?: string;
-  argsText?: string;
+  /** page.* 目标页句柄（= CDP targetId） */
+  pageId?: string;
+  /** page.for-origin */
+  origin?: string;
+  /** page.goto */
+  url?: string;
+  /** page.evaluate：已拼好的表达式（client 侧把 fn+args 序列化） */
+  expr?: string;
+  /** record.start */
   name?: string;
-  /** run only；毫秒。CLI 已校验 15～60 秒。 */
+  /** page.goto 毫秒超时 */
   timeoutMs?: number;
 };
 
@@ -34,13 +50,23 @@ export type SessionResponse = {
   id: string;
   ok: boolean;
   error?: string;
+  /** record.* 的 stdout 文本 */
   text?: string;
   status?: StdoutStatus;
   guide?: string;
+  /** ping */
   pid?: number;
   chrome?: string;
   pages?: number;
   record?: string | null;
+  /** page.for-origin / context.new-page */
+  pageId?: string;
+  /** page.for-origin / page.url / context.new-page */
+  url?: string;
+  /** page.title */
+  title?: string;
+  /** page.evaluate 结果（任意 JSON） */
+  value?: unknown;
 };
 
 export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {

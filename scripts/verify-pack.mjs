@@ -47,10 +47,12 @@ try {
   for (const rel of [
     "SKILL.md",
     "setup.js",
-    "src/yodo.js",
+    "src/sdk.ts",
     "src/holder.ts",
-    "src/cli/index.ts",
+    "src/bin/start.js",
+    "src/bin/record-start.js",
     "src/store/deploy.ts",
+    "src/templates/task-common/yodo.js",
     "src/templates/task-common/url.js",
     "src/node_modules/@ghostery",
     "src/node_modules/tldts",
@@ -64,11 +66,11 @@ try {
     encoding: "utf8",
   });
   assert.equal(setup.status, 0, `setup 失败：${setup.stderr}`);
-  assert.ok(fs.existsSync(path.join(HOME, ".yodo", "src", "yodo.js")), "~/.yodo/src 未建好");
+  assert.ok(fs.existsSync(path.join(HOME, ".yodo", "src", "sdk.ts")), "~/.yodo/src 未建好");
 
   const doctor = spawnSync(
     process.execPath,
-    [path.join(HOME, ".yodo", "src", "yodo.js"), "doctor"],
+    [path.join(HOME, ".yodo", "src", "bin", "doctor.js")],
     { env, encoding: "utf8" },
   );
   assert.equal(doctor.status, 0, `doctor 失败：${doctor.stderr}`);

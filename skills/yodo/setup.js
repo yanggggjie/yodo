@@ -22,7 +22,7 @@ const mode = linkOrCopyRuntime(SRC, DEST);
 console.log(`yodo src ${mode === "link" ? "链接" : "拷贝"} → ${DEST}`);
 
 // 建 ~/.yodo/{task,tmp,record,session} + templates
-const init = spawnSync(process.execPath, [path.join(DEST, "yodo.js"), "init"], {
+const init = spawnSync(process.execPath, [path.join(DEST, "bin", "init.js")], {
   stdio: "inherit",
 });
 process.exit(init.status ?? 0);

@@ -163,6 +163,12 @@ export async function ensureSessionAndRpc(
   return sessionRpc(req, ms);
 }
 
+/** 确保 holder 起来并就绪。就绪返回 null；被 handshake 挡住返回那条响应。 */
+export async function ensureHolder(): Promise<SessionResponse | null> {
+  const attached = await ensureAttached();
+  return attached.ok ? null : attached;
+}
+
 export async function rpcExistingSession(
   req: Parameters<typeof sessionRpc>[0],
   ms: number,

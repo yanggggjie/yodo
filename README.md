@@ -1,16 +1,16 @@
 # yodo
 
-用本机已登录的 Chrome 做成用户目标：能跑 `task/` 就 `yodo run <task>`；没有就 `record`，读抓包，`yodo run <tmp>`，`success` 后 `mv` 再 `yodo run <task>`。
+用本机已登录的 Chrome 做成用户目标：能跑 `task/` 就 `node task/<name>.js`；没有就 `record`，读抓包，`node tmp/<name>.js`，`success` 后 `mv` 再 `node task/<name>.js`。
 
-`yodo run` 成功后报告结果：做了什么，并给一个能核对的 URL。
+task 跑成功后报告结果：做了什么，并给一个能核对的 URL。
 
 ```mermaid
 flowchart TD
     Goal([用户目标]) --> Find{查 task/}
-    Find -->|有| RunTask[yodo run task]
+    Find -->|有| RunTask[node task/name.js]
     Find -->|没有| Record[record]
     Record --> Read[读抓包]
-    Read --> RunTmp[yodo run tmp]
+    Read --> RunTmp[node tmp/name.js]
     RunTmp -->|success| Mv[mv] --> RunTask
     RunTmp -->|5 次 failure| Stop([停，写原因])
     RunTask --> Report[报告结果]
@@ -34,15 +34,16 @@ node setup.js   # ~/.yodo/src 链接到 skill 源码（个别环境降级为拷�
 
 ## 命令
 
-`yodo` = `node ~/.yodo/src/yodo.js`（Windows 用绝对路径）：
+没有 CLI，只有脚本(`yodo` = `import { yodo } from "…/sdk.ts"` 的 SDK):
 
 ```text
-node ~/.yodo/src/yodo.js init
-node ~/.yodo/src/yodo.js doctor
-node ~/.yodo/src/yodo.js record start [name]
-node ~/.yodo/src/yodo.js record stop
-node ~/.yodo/src/yodo.js record abort
-node ~/.yodo/src/yodo.js run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
+node ~/.yodo/src/bin/start.js          # 拉起 holder 并连 Chrome(首次点一次 allow)
+node ~/.yodo/src/bin/stop.js
+node ~/.yodo/src/bin/doctor.js
+node ~/.yodo/src/bin/record-start.js [name]
+node ~/.yodo/src/bin/record-stop.js
+node ~/.yodo/src/bin/record-abort.js
+node ~/.yodo/task/<name>.js [参数]       # task 是自执行脚本,参数走 argv
 ```
 
 ---
@@ -67,17 +68,15 @@ node ~/.yodo/src/yodo.js run <file> [--args='<json>' | --args-file=<file>] [--ti
 
 ## 最小用法
 
-`yodo` = `node ~/.yodo/src/yodo.js`：
-
 ```bash
-yodo run ~/.yodo/task/github-star-repo.js --args='{"repo":"owner/repo"}'
+node ~/.yodo/task/github-star-repo.js owner/repo   # 参数走 argv
 
-yodo record start my-action
+node ~/.yodo/src/bin/record-start.js my-action
 # 在新窗口做一遍，回「好了」
-yodo record stop
+node ~/.yodo/src/bin/record-stop.js
 
-# 读 ~/.yodo/record/my-action/，在 tmp/ 写脚本
-yodo run ~/.yodo/tmp/my-action.js
+# 读 ~/.yodo/record/my-action/，在 tmp/ 写自执行脚本
+node ~/.yodo/tmp/my-action.js
 
 mv ~/.yodo/tmp/my-action.js ~/.yodo/task/my-action.js
 ```
