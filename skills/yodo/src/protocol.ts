@@ -70,11 +70,13 @@ export type SessionResponse = {
 };
 
 export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {
-  "need-install": "请安装 Google Chrome。好了告诉我。",
-  "need-chrome": "请打开 Google Chrome。好了告诉我。",
+  "need-install":
+    "没检测到 Google Chrome，装一下：https://www.google.com/chrome/ 。装好告诉我。",
+  "need-chrome": "我已帮你启动 Chrome；没弹出来就手动打开它。好了告诉我。",
   "need-remote-debugging":
-    "请打开这个 Chrome 实例的 remote-debugging 开关。好了告诉我。",
-  "need-allow": "请点允许本次会话的 remote-debugging 弹窗。好了告诉我。",
+    "我已打开 chrome://inspect/#remote-debugging（没跳转就手动贴这地址），勾选页面上的「Allow remote debugging for this browser instance」。勾好告诉我。",
+  "need-allow":
+    "Chrome 弹出「Allow remote debugging?」时点「Allow」。点了告诉我。",
 };
 
 export const HANDSHAKE_MARKS: Record<HandshakeStatus, string> = {
