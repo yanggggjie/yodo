@@ -1,25 +1,16 @@
 {
-  "name": "yodo",
+  "name": "yodo-skill-repo",
   "version": "3.0.0",
+  "private": true,
   "type": "module",
-  "description": "Use the user's logged-in Chrome to record a site, then run scripts",
+  "description": "Dev harness for the yodo skill; the shippable package lives in skills/yodo/src.",
   "scripts": {
-    "check": "tsc --noEmit",
-    "test": "find skills/yodo/src -name '*.selfcheck.ts' | sort | while read -r f; do node \"$f\" || exit 1; done",
+    "check": "npm --prefix skills/yodo/src run check",
+    "test": "npm --prefix skills/yodo/src run test",
     "dev:install": "npx -y skills add . -s yodo -g -a '*' -y && node skills/yodo/setup.js",
     "verify:pack": "node scripts/verify-pack.mjs"
   },
   "engines": {
     "node": ">=24"
-  },
-  "dependencies": {
-    "@ghostery/adblocker": "^2.18.2",
-    "tldts": "^7.4.11",
-    "write-file-atomic": "^7.0.1"
-  },
-  "devDependencies": {
-    "@types/node": "^22.16.5",
-    "@types/write-file-atomic": "^4.0.3",
-    "typescript": "^5.8.3"
   }
 }

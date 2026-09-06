@@ -56,6 +56,7 @@ try {
     "src/templates/task-common/url.js",
     "src/node_modules/@ghostery",
     "src/node_modules/tldts",
+    "src/node_modules/@types/node",
   ]) {
     assert.ok(fs.existsSync(path.join(skillDir, rel)), `payload 缺 ${rel}`);
   }
