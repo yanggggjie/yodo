@@ -193,7 +193,7 @@ export const yodo = {
     console.log(JSON.stringify({ status: "ok" }));
   },
 
-  /** 建 ~/.yodo 数据目录。 */
+  /** 建 `.yodo/` 数据目录。 */
   async init(): Promise<void> {
     assertNode24();
     ensureHomeLayout();

@@ -1,54 +1,49 @@
 ---
 name: yodo
 description: >-
-  yodo：用本机已登录的 Chrome 做事。
-  触发：yodo；要在已打开或已登录的网站上做事；等人之后用户回「好了」。
+  触发词yodo；操作本机已登录带有票据的 Chrome 来完成用户任务。
 ---
 
-用 yodo 操作用户本机 Chrome（复用已登录态）。没有 CLI，只有脚本：
 
-**跑 task**：`node ~/.yodo/task/<name>.js [参数]`（task 是自执行脚本，参数走命令行 argv）。
-**record**：`node ~/.yodo/src/bin/record-start.js [name]` / `record-stop.js` / `record-abort.js`。
-**其它**：`node ~/.yodo/src/bin/{start,stop,doctor,init}.js`。
-（Windows 用 home 下 `.yodo/...` 的绝对路径，`~` 不展开。）
 
-**首次**：`~/.yodo/src` 不存在，就在本 skill 目录执行 `node setup.js`（把 `~/.yodo/src` 链接到 skill 源码——个别环境降级为拷贝——并建数据目录），再继续。
-**边界**：`~/.yodo/src` 是 yodo 源码（通常是指向 skill 目录的链接），更新会整体覆盖；你的脚本只放 `~/.yodo/{task,tmp}`，更新不碰。改了源码可 `cd ~/.yodo/src && npx tsc --noEmit` 自检（运行期只 strip 类型、不做类型检查）。
 
-对人说「用户目标」，不播报内部状态。`success` 后报告结果：做了什么（用 `result` / `resultFile`），并念 `result.url`——它直达结果页。
-`task` 只指 `~/.yodo/task/*.js`。先看 `~/.yodo/`，再写。目录见文末。
+
+
+
+环境要求：node>24 及 chrome
+
+
+
+.yodo目录：`.yodo/` 在用户 home 下。文中路径相对 `.yodo/`，跑命令用绝对路径。目录能推断就用；不能：`node -p "require('os').homedir()"`，再拼 `.yodo`。查看.yodo，没有 `src/` 则没有初始化，要在本 skill 目录执行 `node setup.js`。
+
+首先判断是否已经初始化，已经初始化的 .yodo 目录下会有 .yodo/src 目录，没有的用 node 执行本文件目录脚本 ./setup.js
+
+按用户任务报告，不播报内部状态。`success` 后报告结果：做了什么（用 `result` / `resultFile`），并念 `result.url`——它直达结果页。
+`task` 只指 `.yodo/task/*.js`。先看 `.yodo/`，再写。目录见文末。
 
 ```text
-用户目标 → 查 task/
+用户任务 → 查 task/
               ├── 有 → node task/<name>.js → 报告结果
               └── 没有 → record → 读抓包 → node tmp/<name>.js
                             ├── success → mv → node task/<name>.js → 报告结果
                             └── 5 次 failure → 停，写原因
 ```
 
-## 连接（handshake）
-
-需要浏览器的命令会自行连接本机 Chrome，复用登录态。连不上时按层立刻返回 `status` + `guide`，**不轮询**：把 `guide` **原样念给用户**，停，等用户回「好了」再重跑（重跑是一次新 connect；holder 已在上次失败时退出）。
-
-每层 yodo 已尽量替用户把下一步铺好——`need-chrome` 时自动拉起 Chrome，`need-remote-debugging` 时自动打开 `chrome://inspect/#remote-debugging`——`guide` 里已写明用户要点/勾的那一下（含链接、checkbox 与弹窗按钮的英文原文）。念 `guide` 就够，别自己另编文案。
-
-四层由浅入深：`need-install`（装 Chrome）→ `need-chrome`（开 Chrome）→ `need-remote-debugging`（开 remote-debugging 开关）→ `need-allow`（点 Chrome 的 Allow 弹窗）。授权在 holder 保持期间免打扰；`stop` 或超时后，下次连接再走一遍 handshake。
-
 ## 1. 查 `task/`
 
-`~/.yodo/task/*.js` 是已验证的自执行脚本。文件头有 `@summary`；用到的参数在头注释里写清对应 argv 位置。
+`.yodo/task/*.js` 是已验证的自执行脚本。文件头有 `@summary`；用到的参数在头注释里写清对应 argv 位置。
 
-按用户目标找能用的（怎么查自定）：
+按用户任务找能用的（怎么查自定）：
 
-- 能直接跑 → `node ~/.yodo/task/<name>.js <参数>`
-- 现有 task 拼得起来 → 在 `tmp/` 写新文件（不改原文件），再 `node ~/.yodo/tmp/<name>.js`
+- 能直接跑 → `node task/<name>.js <参数>`
+- 现有 task 拼得起来 → 在 `tmp/` 写新文件（不改原文件），再 `node tmp/<name>.js`
 - 没有可跑的、又拼不出来 → 去 record；没抓包不要先写脚本探接口
 
 完成：已判定「能直接跑 / 能拼 / 没有」，且跑过匹配的文件，或已决定 record。
 
 ## 2. record
 
-`node ~/.yodo/src/bin/record-start.js [name]` → 有 `guide` 就念，等「好了」→ `node ~/.yodo/src/bin/record-stop.js`。
+`node src/bin/record-start.js [name]` → 有 `guide` 就念，等「好了」→ `node src/bin/record-stop.js`。
 只在新窗口做；已有窗不录。stop / abort 只关录制窗。
 
 完成：`status: stopped` 且有 `recordDir`。`aborted` / `idle` = 没有可用抓包，停。
@@ -62,7 +57,7 @@ description: >-
 只重放抓到的请求；没抓到的不补。
 `late` 的 `mainDoc` 是迟到的页面快照（没有 `method` / HTTP `status`），比一次 HTML GET 信息更丰富。在这份快照里找信息；也可对该 `url` 再做 HTML GET。只发网络请求，不操作 DOM，也不拿 DOM 快照来操作。
 
-在 `~/.yodo/tmp/<name>.js` 写**自执行脚本**：`import` `../task/_common/yodo.js`，在 `await yodo.run(...)` 里按抓包在 `page.evaluate` 发请求。参数走 `process.argv`，可缺省。`goto` 没有 `waitUntil`。
+在 `tmp/<name>.js` 写**自执行脚本**：`import` `../task/_common/yodo.js`，在 `await yodo.run(...)` 里按抓包在 `page.evaluate` 发请求。参数走 `process.argv`，可缺省。`goto` 没有 `waitUntil`。
 
 ```javascript
 import { yodo, pageForOrigin, serializeUrl } from "../task/_common/yodo.js";
@@ -85,36 +80,38 @@ await yodo.run(async ({ browserContext }) => {
 
 同一接口最多 5 次跑（只计有 `status` 的；只有 `error` 不算）。`failure` 且 403 多半是缺客户端签名——改走页内 XHR（站点常 monkey-patch `XMLHttpRequest` 自动注入 `a_bogus` / `X-Bogus` 等），比手写逆向稳。页内太慢就减小数据量。
 
-- `status: success` → 写上 `@summary` 和参数说明，`mv ~/.yodo/tmp/<name>.js ~/.yodo/task/<name>.js`，再跑。
+- `status: success` → 写上 `@summary` 和参数说明，`mv tmp/<name>.js task/<name>.js`，再跑。
 - 5 次 `failure` → 停，写清：接口、原因、试了什么。没出现过 `success` 不准进 `task/`。
 
 完成：`mv` 完成并跑成功，或已写出原因并停。
 
 ## `status`
 
+需要浏览器的命令会自行连接。连不上或要等人时：把 `guide` **原样念给用户**，停，等「好了」再重跑。不轮询。
+
 有 `status` 按下表；只有 `error`、没有 `status`：命令没跑起来，停，不算进 5 次。`error` 一律是字符串。
 
 | `status` | 做 |
 |---|---|
-| `need-*` / `recording` | 念 `guide`，停，等「好了」（连接四层见「连接」段） |
+| `need-*` / `recording` | 念 `guide`，停，等「好了」 |
 | `stopped` | 读 `recordDir` |
 | `success` | 用 `result` 或 `resultFile`；tmp 要留下 → `mv`。报告结果 |
 | `failure` | 已执行并抛错。不到 5 次就改再跑 |
 | `idle` / `aborted` | 没有可用抓包 |
 
-卡住了杀 `~/.yodo/session/pid`（断 CDP，不杀 Chrome）。stdout 不够再看 `session/log.jsonl`。
+卡住了杀 `session/pid`（断 CDP，不杀 Chrome）。stdout 不够再看 `session/log.jsonl`。
 
 ## 文件目录
 
 ```text
-~/.yodo/
-  src/       yodo 源码（指向 skill 的链接）。bin/ 在 src/bin/。别在这写业务脚本。
+.yodo/
+  src/       yodo 源码。bin/ 在 src/bin/。别在这写业务脚本（更新会覆盖）。
   task/      已验证的自执行脚本 + _common/。小，任意读。
   tmp/       未验证脚本。唯一能随便写的地方。小，任意读。
   record/    抓包。record stop 后才有可用目录。
-             timeline.jsonl              索引。行：type、requestType、method、url、file。小，任意读。
-             01_GET_host.json            request：url（bareUrl + query）、frameUrl、headers、body；这里的 status 是 HTTP。小，任意读。
-             01_GET_host.response.json   响应体 > 1KB 时拆出。大，不要整份读。
+             timeline.jsonl              索引。小，任意读。
+             01_GET_host.json            request。小，任意读。
+             01_GET_host.response.json   响应体。大，不要整份读。
              01_GET_host.response.html   整页 HTML。大，不要整份读。
   session/   pid · sock · log.jsonl。
 ```
@@ -124,9 +121,9 @@ await yodo.run(async ({ browserContext }) => {
 | 脚本 | 写 |
 |---|---|
 | `node src/bin/init.js` | 建 `task/`、`tmp/`、`record/`、`session/`（`setup.js` 已自动调） |
-| `node src/bin/start.js` | 拉起 holder 并连 Chrome（点一次授权后保持）；`ok` 或 `need-*` |
-| `node src/bin/stop.js` | 停 holder（授权失效） |
-| `node src/bin/doctor.js` | 打印 Node 版本、运行路径、holder 与授权状态、布局 |
+| `node src/bin/start.js` | 拉起并连 Chrome（点一次授权后保持）；`ok` 或 `need-*` |
+| `node src/bin/stop.js` | 停掉连接（授权失效） |
+| `node src/bin/doctor.js` | 排障：路径不对、布局缺、holder 占死。打印 Node、`platform`、`home`、布局、连接 |
 | `node src/bin/record-start.js [name]` | 往 `record/.active/<name>/` 抓；stdout：`recording` + `guide` |
 | `node src/bin/record-stop.js` | 归档到 `record/<name>/`；stdout：`stopped` + `recordDir` |
 | `node src/bin/record-abort.js` | 扔掉这次抓包；`aborted`。当时没在录：`idle` |
