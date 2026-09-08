@@ -137,21 +137,20 @@ const originRaw: RawCdpConnection = {
   commandTimeoutMs: 15_000,
   send: async (method, params) => {
     originSent.push({ method, params });
-    if (method === "Target.getTargets") {
-      return {
-        targetInfos: [
-          { targetId: "other", type: "page", url: "https://b.com/" },
-          { targetId: "hit", type: "page", url: "https://a.com/x" },
-          { targetId: "ntp", type: "page", url: "chrome://new-tab-page" },
-        ],
-      };
+    if (method === "Target.createTarget") {
+      assert.equal(params?.newWindow, true);
+      assert.equal(params?.background, true);
+      assert.equal(params?.focus, false);
+      return { targetId: "run-tab" };
     }
+    if (method === "Browser.getWindowForTarget") return { windowId: 42 };
     if (method === "Target.attachToTarget") {
       return { sessionId: `s-${(params as { targetId?: string })?.targetId}` };
     }
     if (method === "Runtime.evaluate") {
       return { result: { type: "string", value: "ok" } };
     }
+    if (method === "Page.navigate") return { frameId: "f1" };
     return {};
   },
   on: () => () => {},
@@ -161,10 +160,43 @@ const originRaw: RawCdpConnection = {
 };
 const originCtx = new CdpContext(originRaw);
 await originCtx.init();
+const runPage = await originCtx.openRunWindow();
+assert.equal(runPage.targetId, "run-tab");
 const originPage = await originCtx.pageForOrigin("https://a.com");
-assert.equal(originPage.targetId, "hit");
-const attaches = originSent.filter((s) => s.method === "Target.attachToTarget");
-assert.equal(attaches.length, 1);
-assert.equal(attaches[0]?.params?.targetId, "hit");
+assert.equal(originPage.targetId, "run-tab");
+assert.equal((await originCtx.newPage()).targetId, "run-tab");
+assert.equal(originSent.filter((s) => s.method === "Target.createTarget").length, 1);
+assert.ok(!originSent.some((s) => s.method === "Target.getTargets"));
+assert.ok(originSent.some((s) => s.method === "Page.navigate"));
+await originCtx.closeRunWindow();
+assert.ok(originSent.some((s) => s.method === "Target.closeTarget"));
+
+const recSent: { method: string; params?: Record<string, unknown> }[] = [];
+const recRaw: RawCdpConnection = {
+  browserSessionId: "browser",
+  commandTimeoutMs: 15_000,
+  send: async (method, params) => {
+    recSent.push({ method, params });
+    if (method === "Target.createTarget") {
+      assert.equal(params?.newWindow, true);
+      assert.equal(params?.background, undefined);
+      return { targetId: "rec-tab" };
+    }
+    if (method === "Browser.getWindowForTarget") return { windowId: 7 };
+    if (method === "Target.attachToTarget") {
+      return { sessionId: `s-${(params as { targetId?: string })?.targetId}` };
+    }
+    return {};
+  },
+  on: () => () => {},
+  onClose: () => () => {},
+  isClosed: () => false,
+  close: async () => {},
+};
+const recCtx = new CdpContext(recRaw);
+const rec = await recCtx.openRecordWindow();
+assert.equal(rec.page.targetId, "rec-tab");
+assert.equal(rec.windowId, 7);
+assert.ok(recSent.some((s) => s.method === "Page.bringToFront"));
 
 console.log("browser session selfcheck ok");

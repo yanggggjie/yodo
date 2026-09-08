@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { MAX_BODY_BYTES, RESPONSE_SPLIT_BYTES } from "../utils/constants.ts";
 import { parseUrl } from "../utils/url.ts";
 import { createLogger } from "../utils/logger.ts";
-import { isChromeUiUrl, setDiscoverTargets, setPageAutoAttach, type RawCdpConnection } from "../browser/index.ts";
+import { closeTargetsKeepChrome, isChromeUiUrl, setDiscoverTargets, setPageAutoAttach, type RawCdpConnection } from "../browser/index.ts";
 import type { RawAction, RawEvent, RawRequest, RequestKind, TimelineActionType } from "./types.ts";
 import { isRawAction } from "./types.ts";
 
@@ -125,19 +125,7 @@ export async function closeTrackedWindows(
   }
 
   if (closing.size === 0) return;
-
-  const leftover = pages.filter((t) => !closing.has(t.targetId));
-  if (leftover.length === 0) {
-    await raw
-      .send("Target.createTarget", { url: "about:blank", newWindow: true })
-      .catch(() => {});
-  }
-
-  await Promise.all(
-    [...closing].map((targetId) =>
-      raw.send("Target.closeTarget", { targetId }).catch(() => {}),
-    ),
-  );
+  await closeTargetsKeepChrome(raw as RawCdpConnection, closing);
 }
 
 export class ActiveRecordStore {

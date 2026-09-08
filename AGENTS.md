@@ -46,7 +46,9 @@ holder 对每个 op 回 `ok`；task 的业务结果由 client 侧 `yodo.run` 拼
 ## CDP attach
 
 - 录制期间不要 browser 级 `Target.setAutoAttach`。只 `attachToTarget` 录制窗里的 page；popup 靠该 page session 上 related `setAutoAttach`（`waitForDebuggerOnStart: false`，`filter: [{ type: "page" }]`）。sibling 新 tab 用 `Target.setDiscoverTargets` 通知后再按 `windowId` 决定是否 attach。别人窗零 CDP。`chrome://` / `devtools://` 不 attach。idle holder 只留 CDP WebSocket，`autoAttach: false`，`discover: false`。`page.for-origin` op 按 origin 只挂一个 page，不全量 attach。
-- `pageForOrigin`：已有同 origin 的 page 就复用；找不到就打开。
+- 演示 / record：新窗口前台（`newWindow: true`），`stop` / `abort` / 超时后关掉这一扇录制窗。
+- run：`run.begin` 开一扇后台新窗（`newWindow: true`、`background: true`、`focus: false`）。`pageForOrigin` / `newPage` 只用这扇窗里的 tab，不挂用户已有 tab。`run.end` 关掉这扇窗；若会关到 Chrome 只剩它，先开一扇后台空白窗。
+- `pageForOrigin`：只复用本 run 窗里同 origin 的 page；没有就在该窗现有 tab 上 goto。
 - `goto` 没有 `waitUntil`。
 
 ## 收尾与过滤

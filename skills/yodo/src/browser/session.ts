@@ -541,10 +541,51 @@ export class CdpPage {
   }
 }
 
+async function pageTargets(
+  raw: RawCdpConnection,
+): Promise<{ targetId: string; type?: string }[]> {
+  const res = (await raw.send("Target.getTargets")) as {
+    targetInfos?: { targetId: string; type?: string }[];
+  };
+  return (res.targetInfos ?? []).filter((t) => t.type === "page");
+}
+
+/** 关掉一批 page。若会关到 Chrome 只剩这些，先开一扇后台空白窗，避免退出。 */
+export async function closeTargetsKeepChrome(
+  raw: RawCdpConnection,
+  targetIds: Iterable<string>,
+): Promise<void> {
+  const closing = new Set(targetIds);
+  if (closing.size === 0) return;
+  let pages: { targetId: string; type?: string }[] = [];
+  try {
+    pages = await pageTargets(raw);
+  } catch {
+    pages = [];
+  }
+  const leftover = pages.filter((t) => !closing.has(t.targetId));
+  if (leftover.length === 0) {
+    await raw
+      .send("Target.createTarget", {
+        url: "about:blank",
+        newWindow: true,
+        background: true,
+        focus: false,
+      })
+      .catch(() => {});
+  }
+  await Promise.all(
+    [...closing].map((targetId) =>
+      raw.send("Target.closeTarget", { targetId }).catch(() => {}),
+    ),
+  );
+}
+
 export class CdpContext {
   private raw: RawCdpConnection;
   private pagesMap = new Map<string, CdpPage>();
   private sessionToTarget = new Map<string, string>();
+  private runWindowId: number | null = null;
 
   constructor(raw: RawCdpConnection) {
     this.raw = raw;
@@ -595,35 +636,71 @@ export class CdpContext {
     await setPageAutoAttach(this.raw, false);
   }
 
-  /** 已有同 origin 的 page 就复用；找不到就打开。 */
+  async openRunWindow(): Promise<CdpPage> {
+    if (this.runWindowId != null) throw new Error("run 窗已开");
+    const page = await this.createPage({
+      url: "about:blank",
+      newWindow: true,
+      background: true,
+      focus: false,
+    });
+    const win = (await this.raw.send("Browser.getWindowForTarget", {
+      targetId: page.targetId,
+    })) as { windowId?: number };
+    if (win?.windowId == null) {
+      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
+      this.forgetPage(page.targetId);
+      throw new Error("run 窗没有 windowId");
+    }
+    this.runWindowId = win.windowId;
+    return page;
+  }
+
+  async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
+    const page = await this.createPage({
+      url: "about:blank",
+      newWindow: true,
+    });
+    await page.bringToFront();
+    const win = (await this.raw.send("Browser.getWindowForTarget", {
+      targetId: page.targetId,
+    })) as { windowId?: number };
+    if (win?.windowId == null) {
+      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
+      this.forgetPage(page.targetId);
+      throw new Error("record 窗没有 windowId");
+    }
+    return { page, windowId: win.windowId };
+  }
+
+  async closeRunWindow(): Promise<void> {
+    const ids = new Set(this.pages().map((p) => p.targetId));
+    if (this.runWindowId != null) {
+      try {
+        for (const t of await pageTargets(this.raw)) {
+          const win = (await this.raw.send("Browser.getWindowForTarget", {
+            targetId: t.targetId,
+          })) as { windowId?: number };
+          if (win?.windowId === this.runWindowId) ids.add(t.targetId);
+        }
+      } catch {
+        /* getTargets 失败就只关已挂上的 */
+      }
+    }
+    this.runWindowId = null;
+    await closeTargetsKeepChrome(this.raw, ids);
+    await this.detachAllPages();
+  }
+
+  /** 只复用本 run 窗里已挂上的同 origin page；没有就在该窗现有 tab 上 goto。不挂用户已有 tab。 */
   async pageForOrigin(origin: string): Promise<CdpPage> {
+    if (this.runWindowId == null) throw new Error("run 窗未开");
     const want = new URL(origin).origin;
     for (const p of this.pages()) {
       try {
         if (new URL(p.url()).origin === want) return p;
       } catch {
         /* about:blank / chrome:// */
-      }
-    }
-    const targetsRes = (await this.raw.send("Target.getTargets")) as {
-      targetInfos?: { targetId: string; type: string; url?: string }[];
-    };
-    for (const target of targetsRes?.targetInfos || []) {
-      if (target.type !== "page") continue;
-      const url = target.url || "";
-      if (!url || url === "about:blank" || isChromeUiUrl(url)) continue;
-      try {
-        if (new URL(url).origin !== want) continue;
-      } catch {
-        continue;
-      }
-      if (this.pagesMap.has(target.targetId)) {
-        return this.pagesMap.get(target.targetId)!;
-      }
-      try {
-        return await this.attachExisting(target.targetId, url);
-      } catch {
-        /* target might have closed */
       }
     }
     const page = await this.newPage();
@@ -649,12 +726,27 @@ export class CdpContext {
     );
   }
 
-  private async attachExisting(targetId: string, url: string): Promise<CdpPage> {
+  private forgetPage(targetId: string): void {
+    const page = this.pagesMap.get(targetId);
+    if (page) {
+      page.markClosed();
+      this.pagesMap.delete(targetId);
+      this.sessionToTarget.delete(page.sessionId);
+    }
+  }
+
+  private async createPage(params: Record<string, unknown>): Promise<CdpPage> {
+    const createRes = (await this.raw.send("Target.createTarget", params)) as {
+      targetId: string;
+    };
+    const targetId = createRes.targetId;
+    const existing = this.pagesMap.get(targetId);
+    if (existing) return existing;
     const attachRes = (await this.raw.send("Target.attachToTarget", {
       targetId,
       flatten: true,
     })) as { sessionId: string };
-    const page = new CdpPage(this.raw, targetId, attachRes.sessionId, url);
+    const page = new CdpPage(this.raw, targetId, attachRes.sessionId, "about:blank");
     this.sessionToTarget.set(attachRes.sessionId, targetId);
     this.pagesMap.set(targetId, page);
     await page.initPage();
@@ -670,23 +762,9 @@ export class CdpContext {
   }
 
   async newPage(): Promise<CdpPage> {
-    const createRes = (await this.raw.send("Target.createTarget", {
-      url: "about:blank",
-    })) as { targetId: string };
-
-    const targetId = createRes.targetId;
-    const existing = this.pagesMap.get(targetId);
-    if (existing) return existing;
-
-    const attachRes = (await this.raw.send("Target.attachToTarget", {
-      targetId,
-      flatten: true,
-    })) as { sessionId: string };
-
-    const page = new CdpPage(this.raw, targetId, attachRes.sessionId, "about:blank");
-    this.sessionToTarget.set(attachRes.sessionId, targetId);
-    this.pagesMap.set(targetId, page);
-    await page.initPage();
+    if (this.runWindowId == null) throw new Error("run 窗未开");
+    const page = this.pages()[0];
+    if (!page) throw new Error("run 窗没有 tab");
     return page;
   }
 }

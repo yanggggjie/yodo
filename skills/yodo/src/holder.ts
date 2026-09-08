@@ -113,6 +113,7 @@ async function runEnd(): Promise<void> {
   activeRunConn = null;
   conn.runActive = false;
   if (browser) browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
+  await context?.closeRunWindow().catch(warnCatch("closeRunWindow"));
   await settleIdle().catch(warnCatch("run end settle"));
 }
 
@@ -144,10 +145,11 @@ async function handleOp(req: SessionRequest, conn: ConnState): Promise<SessionRe
           return { id, ok: false, error: `record ${rec} 仍在进行；请先 record stop/abort` };
         }
         if (recordBusy) return { id, ok: false, error: "record 操作进行中" };
-        activeRunConn = conn;
-        conn.runActive = true;
         browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
         await setIgnoreCertificateErrors(browser!.raw, true);
+        await context!.openRunWindow();
+        activeRunConn = conn;
+        conn.runActive = true;
         return { id, ok: true };
       }
       case "run.end": {
@@ -182,6 +184,7 @@ async function handleOp(req: SessionRequest, conn: ConnState): Promise<SessionRe
         await pageById(req.pageId).close();
         return { id, ok: true };
       case "page.bring-to-front":
+        if (activeRunConn) return { id, ok: false, error: "run 不抢前台" };
         await pageById(req.pageId).bringToFront();
         return { id, ok: true };
 

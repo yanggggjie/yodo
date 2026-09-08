@@ -74,7 +74,7 @@ export function liveRecordName(): string | null {
 
 export async function startRecord(
   browser: CdpBrowser,
-  _context: CdpContext,
+  context: CdpContext,
   options: { name?: string },
 ): Promise<string> {
   if (active) throw new Error(`record ${active.name} 仍在进行`);
@@ -90,27 +90,9 @@ export async function startRecord(
 
   try {
     const raw = browser.raw;
-    const bornRes = (await raw.send("Target.createTarget", {
-      url: "about:blank",
-      newWindow: true,
-    })) as { targetId: string };
-    const bornTargetId = bornRes.targetId;
-
-    let winId: number | undefined;
-    try {
-      const win = (await raw.send("Browser.getWindowForTarget", {
-        targetId: bornTargetId,
-      })) as { windowId?: number };
-      winId = win?.windowId;
-    } catch {
-      /* ignore */
-    }
-
-    if (winId !== undefined) {
-      tracker.initWindow(bornTargetId, winId);
-    } else {
-      tracker.activeTargets.add(bornTargetId);
-    }
+    const { page, windowId } = await context.openRecordWindow();
+    const bornTargetId = page.targetId;
+    tracker.initWindow(bornTargetId, windowId);
 
     networkRecorder = await startCdpNetworkRecorder(raw, active, tracker);
     adblockEngine = await loadAdblockEngine();

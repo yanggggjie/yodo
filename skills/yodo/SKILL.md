@@ -88,7 +88,7 @@ await yodo.run(async ({ browserContext }) => {
 });
 ```
 
-`_common/yodo.js` 给出 `yodo`、`pageForOrigin`、`serializeUrl`、`parseUrl`。`pageForOrigin(browserContext, origin)` 已有同 origin 的 page 就复用，找不到就打开；不关用户已有 tab。`yodo.run` 在本进程跑闭包，浏览器操作发给已连上的 Chrome；闭包 return 的值变成 stdout 的 `result`。不要在 return 里写 `url`。`page.goto(url, { timeout }?)` 没有 `waitUntil`。`page.evaluate(fn, ...args)` 只能传可 JSON 序列化的参数。`page.url()` / `page.title()` / `page.close()` / `page.bringToFront()` / `browserContext.newPage()` 也在，写重放用不到就别用。
+`_common/yodo.js` 给出 `yodo`、`pageForOrigin`、`serializeUrl`、`parseUrl`。`pageForOrigin(browserContext, origin)` 只复用本次 run 窗里同 origin 的 page，没有就在该窗现有 tab 上 goto；不挂用户已有 tab。`yodo.run` 在本进程跑闭包，浏览器操作发给已连上的 Chrome；闭包 return 的值变成 stdout 的 `result`。不要在 return 里写 `url`。`page.goto(url, { timeout }?)` 没有 `waitUntil`。`page.evaluate(fn, ...args)` 只能传可 JSON 序列化的参数。`page.url()` / `page.title()` / `page.close()` / `page.bringToFront()` / `browserContext.newPage()` 也在，写重放用不到就别用。
 
 需要浏览器时命令会自己连。stdout 有 `need-install` / `need-chrome` / `need-remote-debugging` / `need-allow`：把 `guide` 原样念给用户，停，等用户回「好了」，再重跑刚才那条命令。不轮询，不改写 `guide`。只有 `error`、没有 `status`：命令没跑起来，停，对人说明；这次不计入同一接口的 3 次，也不计入本用户任务的 8 次。
 

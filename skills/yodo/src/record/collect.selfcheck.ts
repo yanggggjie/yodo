@@ -197,7 +197,10 @@ assert.ok(!sent.some((s) => s.method === "Network.enable"));
     },
     lastOnly,
   );
-  assert.ok(calls.some((c) => c.method === "Target.createTarget" && c.params?.newWindow === true));
+  const keep = calls.find((c) => c.method === "Target.createTarget");
+  assert.equal(keep?.params?.newWindow, true);
+  assert.equal(keep?.params?.background, true);
+  assert.equal(keep?.params?.focus, false);
   assert.ok(calls.some((c) => c.method === "Target.closeTarget" && c.params?.targetId === "born"));
   assert.ok(!calls.some((c) => c.method === "Browser.close"));
 }
