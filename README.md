@@ -1,80 +1,34 @@
 # yodo
 
-用本机已登录的 Chrome 做成用户目标：能跑 `task/` 就 `yodo run <task>`；没有就 `record`，读抓包，`yodo run <tmp>`，`success` 后 `mv` 再 `yodo run <task>`。
+用本机已经登录的 Chrome 做事。你在 Chrome 里能做的，也可以让它做。
 
-`yodo run` 成功后报告结果：做了什么，并给一个能核对的 URL。
-
-```mermaid
-flowchart TD
-    Goal([用户目标]) --> Find{查 task/}
-    Find -->|有| RunTask[yodo run task]
-    Find -->|没有| Record[record]
-    Record --> Read[读抓包]
-    Read --> RunTmp[yodo run tmp]
-    RunTmp -->|success| Mv[mv] --> RunTask
-    RunTmp -->|5 次 failure| Stop([停，写原因])
-    RunTask --> Report[报告结果]
-```
-
-Agent 流程见 `skills/yodo/SKILL.md`。
-
----
+做不成会说明原因。
 
 ## 安装
 
-```bash
-npx -y yodo-cli@latest init
+把下面整段复制给你的 agent：
+
+```
+请安装 yodo。先执行：
+npx skills add yanggggjie/yodo -g -y -a '*' -s yodo
+再读取并严格执行这份说明：
+https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 ```
 
-本地开发：
+## 怎么用
 
-```bash
-npm run dev:install
+Agent 对话里说 `yodo` + 要做的事：
+
+```
+yodo 帮我搜索一下知乎 agent 然后看看第三条帖子的内容是什么，然后给第三条点赞
 ```
 
----
-
-## CLI
-
-```text
-yodo init
-yodo record start [name]
-yodo record stop
-yodo record abort
-yodo run <file> [--args='<json>' | --args-file=<file>] [--timeout=<15-60>]
+```
+yodo 打开我的 X，总结我的关注最近三条是什么
 ```
 
----
-
-## `~/.yodo/`
-
-```text
-~/.yodo/
-├── session/     # CDP 连接的 pid · sock · log
-├── task/        # 已验证脚本
-│   └── _common/
-├── tmp/         # 未验证脚本
-└── record/      # 抓包
-    └── <name>/
-        ├── timeline.jsonl
-        ├── 01_GET_host_path.json
-        ├── 01_GET_host_path.response.json
-        └── 01_GET_host_path.response.html
+```
+yodo 搜小红书「东京咖啡」，把前三条标题给我
 ```
 
----
-
-## 最小用法
-
-```bash
-yodo run ~/.yodo/task/github-star-repo.js --args='{"repo":"owner/repo"}'
-
-yodo record start my-action
-# 在新窗口做一遍，回「好了」
-yodo record stop
-
-# 读 ~/.yodo/record/my-action/，在 tmp/ 写脚本
-yodo run ~/.yodo/tmp/my-action.js
-
-mv ~/.yodo/tmp/my-action.js ~/.yodo/task/my-action.js
-```
+第一次连 Chrome 时，agent 会把要点念给你（开 Chrome、勾 remote-debugging、点 Allow）。做完回「好了」即可。
