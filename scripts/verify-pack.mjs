@@ -1,5 +1,5 @@
-// 分发烟测：把本 repo 的 skill 用 `skills add --copy` 装进隔离 HOME，断言 payload 完整
-// （src、node_modules、setup.js 都在），再从安装位跑 setup + doctor，确认自足可运行。
+// 分发烟测：把本 repo 的 skill 用 `skills add --copy` 装进隔离 HOME，断言 payload
+// 不含 vendored node_modules，再从安装位跑 setup（拷贝 + npm install）+ doctor。
 // 用法：npm run verify:pack
 import * as assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -54,29 +54,39 @@ try {
     "src/store/deploy.ts",
     "src/templates/task-common/yodo.js",
     "src/templates/task-common/url.js",
-    "src/node_modules/@ghostery",
-    "src/node_modules/tldts",
-    "src/node_modules/@types/node",
+    "src/package.json",
+    "src/package-lock.json",
   ]) {
     assert.ok(fs.existsSync(path.join(skillDir, rel)), `payload 缺 ${rel}`);
   }
 
-  // 从安装位跑 setup（link/copy 到 ~/.yodo/src），再 doctor
   const setup = spawnSync(process.execPath, [path.join(skillDir, "setup.js")], {
     env,
     encoding: "utf8",
   });
-  assert.equal(setup.status, 0, `setup 失败：${setup.stderr}`);
-  assert.ok(fs.existsSync(path.join(HOME, ".yodo", "src", "sdk.ts")), "~/.yodo/src 未建好");
+  assert.equal(setup.status, 0, `setup 失败：${setup.stderr || setup.stdout}`);
+  const dest = path.join(HOME, ".yodo", "src");
+  assert.ok(fs.existsSync(path.join(dest, "sdk.ts")), "~/.yodo/src 未建好");
+  assert.ok(
+    fs.existsSync(path.join(dest, "node_modules", "tldts", "dist", "cjs", "index.js")),
+    "setup 后缺 tldts",
+  );
+
+  const smoke = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", 'import { getDomain } from "tldts"; getDomain("https://www.zhihu.com");'],
+    { cwd: dest, env, encoding: "utf8" },
+  );
+  assert.equal(smoke.status, 0, `import tldts 失败：${smoke.stderr}`);
 
   const doctor = spawnSync(
     process.execPath,
-    [path.join(HOME, ".yodo", "src", "bin", "doctor.js")],
+    [path.join(dest, "bin", "doctor.js")],
     { env, encoding: "utf8" },
   );
-  assert.equal(doctor.status, 0, `doctor 失败：${doctor.stderr}`);
+  assert.equal(doctor.status, 0, `doctor 失败：${doctor.stderr || doctor.stdout}`);
 
-  console.log("[verify:pack] ok — payload 完整且自足可运行");
+  console.log("[verify:pack] ok — payload 完整，setup 拷贝 + npm install 可运行");
 } finally {
   fs.rmSync(HOME, { recursive: true, force: true });
 }

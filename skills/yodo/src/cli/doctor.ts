@@ -9,7 +9,9 @@ import {
 } from "../utils/constants.ts";
 import { isPidAlive, readSessionPid } from "./spawn.ts";
 
-/** 排障：Node 版本、代码运行位置、`.yodo/` 布局、holder 存活。 */
+const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
+
+/** 排障：Node 版本、代码运行位置、`.yodo/` 布局、依赖、holder 存活。 */
 export function handleDoctor(): void {
   const major = Number(process.versions.node.split(".")[0]);
   const nodeOk = Number.isFinite(major) && major >= 24;
@@ -20,20 +22,20 @@ export function handleDoctor(): void {
     `home ${YODO_HOME} ${fs.existsSync(YODO_HOME) ? "ok" : "缺失（跑 setup / init）"}`,
   );
 
-  // 代码实际运行位置（symlink 会被 Node realized 成 skill 目录真实路径）
   console.log(`running from ${import.meta.dirname}`);
 
   const srcPath = path.join(YODO_HOME, "src");
-  try {
-    const st = fs.lstatSync(srcPath);
-    if (st.isSymbolicLink()) {
-      console.log(`src → link → ${fs.readlinkSync(srcPath)}`);
-    } else {
-      console.log(`src (copy)`);
-    }
-  } catch {
+  if (fs.existsSync(srcPath)) {
+    console.log(`src ok`);
+  } else {
     console.log(`src 缺失（跑 setup）`);
+    process.exitCode = 1;
   }
+
+  const marker = path.join(srcPath, DEPS_MARKER);
+  console.log(`deps ${fs.existsSync(marker) ? "ok" : "缺失（再跑 setup）"}`);
+  if (!fs.existsSync(marker)) process.exitCode = 1;
+
   for (const [name, dir] of [
     ["task", TASK_DIR],
     ["tmp", TMP_DIR],
@@ -48,4 +50,3 @@ export function handleDoctor(): void {
     `holder ${pid ? (isPidAlive(pid) ? `alive pid=${pid}` : `stale pid=${pid}`) : "无"}`,
   );
 }
-

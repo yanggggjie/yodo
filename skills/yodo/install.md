@@ -20,15 +20,15 @@
 
 # 2. setup
 
-`setup.js` 一次做完源码就位和建目录。`init.js` 只建数据目录。`doctor.js` 不推进安装，只在对不上的时候看一眼。
+`setup.js` 一次做完源码就位、装依赖和建目录。`init.js` 只建数据目录。`doctor.js` 不推进安装，只在对不上的时候看一眼。
 
 ## 2.1 跑 setup.js
 
-在 skill 目录（这份文件和 `SKILL.md` 旁边）执行 `node setup.js`。它检查 Node ≥24，把本 skill 的 `src/` 链接或拷到 `<home>/.yodo/src`（建不了链接就整目录拷贝），再调 `src/bin/init.js` 建 `task/` `tmp/` `record/` `session/`，并同步 `task/_common/`。用户和 agent 写的脚本在 `task/` `tmp/`，`setup.js` 不碰它们。`src/` 更新会覆盖，不要在那里写业务脚本。
+在 skill 目录（这份文件和 `SKILL.md` 旁边）执行 `node setup.js`。它检查 Node ≥24，把本 skill 的 `src/` 拷贝到 `<home>/.yodo/src`（不拷 source 里的 `node_modules`），再在该目录 `npm install`，然后调 `src/bin/init.js` 建 `task/` `tmp/` `record/` `session/`，并同步 `task/_common/`。用户和 agent 写的脚本在 `task/` `tmp/`，`setup.js` 不碰它们。`src/` 更新会覆盖，不要在那里写业务脚本。
 
 报错就对着这次输出和 `setup.js` 源码给办法。不要另写一个安装脚本。
 
-完成：绝对路径下存在 `.yodo/src`（链接或拷贝）。
+完成：绝对路径下存在 `.yodo/src`，且其中有 `node_modules/tldts/dist/cjs/index.js`。
 
 ## 2.2 验收目录
 
@@ -36,12 +36,12 @@
 
 | 目录 | 安装要留下 |
 |---|---|
-| `.yodo/src` | 源码（链接或拷贝）。没有它 = 未初始化 |
+| `.yodo/src` | 源码拷贝 + 本地 `npm install` 的依赖。没有它 = 未初始化 |
 | `.yodo/task` | 以后放已验证脚本。安装时带上 `_common/` |
 | `.yodo/tmp` | 以后试跑 |
 | `.yodo/record` | 以后放抓包 |
 | `.yodo/session` | pid · sock · log.jsonl |
 
-缺一块再跑 `setup.js`。只缺数据目录时可以单独跑 `node <home>/.yodo/src/bin/init.js`（建四个数据目录并同步 `_common/`；`setup.js` 已经会调）。布局仍乱、路径不对、holder 占死，才跑 `node <home>/.yodo/src/bin/doctor.js`：打印 Node、`platform`、`home`、`src` 是链接还是拷贝、四个数据目录在不在、holder 是否占死。这是给自己看的，不要把整段输出念给用户。
+缺一块再跑 `setup.js`。只缺数据目录时可以单独跑 `node <home>/.yodo/src/bin/init.js`（建四个数据目录并同步 `_common/`；`setup.js` 已经会调）。布局仍乱、路径不对、依赖缺失、holder 占死，才跑 `node <home>/.yodo/src/bin/doctor.js`：打印 Node、`platform`、`home`、`src`、依赖、四个数据目录、holder。这是给自己看的，不要把整段输出念给用户。
 
 完成：五个目录都在，且 `task/_common/yodo.js` 在。安装结束。
