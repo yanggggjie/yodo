@@ -1,0 +1,26 @@
+来源：sdk.ts / protocol.ts / bin/*.js / templates/task-common / record/write.ts。
+执行 SKILL 时 `.yodo` 已立好（立目录、Node、Chrome 安装在 `install.md`，不进本文件）。
+
+一条 use case = 一个可单独做完的目标，不是步骤，也不是 holder / CDP 实现细节。
+
+没有 CLI。对外是：`yodo` SDK、`src/bin/*.js` 薄脚本、`task/` `tmp/` 里的自执行脚本。需要浏览器的命令会自己连；连不上打印 `{ status, guide }` 后立刻返回，不轮询。
+
+1. 跑已有 task
+   目标：用户要做的事，`.yodo/task/*.js` 里已有对得上的已验证脚本。
+   操作：读文件头 `@summary` 和 argv 说明；`node <home>/.yodo/task/<name>.js [参数]`。需要浏览器时命令自己连。stdout 是 `need-*` 就把 `guide` 原样念给用户，停，等「好了」再重跑。`success` 用 `result` / `resultFile` 对人讲；检验 URL 由 agent 看这份 task 脚本现拼（正确 path + query），脚本不要 return `url`。
+   可观察结果：stdout 有 `status: success`（及 `result` 或 `resultFile`），或已把 `guide` 念出并在等「好了」；直接跑现成 task 得到 `failure` 则停、不改 `task/` 原文件。
+
+2. 组合现有 task
+   目标：没有一份直接对应，但现有脚本能拼成这次要的。
+   操作：在 `.yodo/tmp/` 写新文件（不改 `task/` 原文件），`import` `_common/yodo.js` 和现有逻辑，`node <home>/.yodo/tmp/<name>.js`。`success` 后才 `mv` 进 `task/`，再跑那份 task 并报告。
+   可观察结果：`tmp` 上出现过 `status: success`，`task/` 多了一份能再跑成功的文件，并对人讲了结果；或满 5 次 `failure` 后停并说明做不成。
+
+3. 录用户操作
+   目标：不知道站点真实请求，让用户在新窗口做一遍，拿到可读的抓包。
+   操作：`node <home>/.yodo/src/bin/record-start.js [name]`。`recording` 时念 `guide`，等「好了」，再 `record-stop.js`。只在新窗口做。不要这次了就 `record-abort.js`。正在录时不读 `record/.active/`。
+   可观察结果：`status: stopped` 且有 `recordDir`（内含 `timeline.jsonl` 和 request 文件）；或 `aborted` / `idle`（没有可用抓包）。
+
+4. 对着抓包写出脚本
+   目标：把抓到的请求变成可重复跑的自执行脚本。
+   操作：读 `timeline.jsonl` 定接口，再打开对应 request JSON。在 `tmp/` 写脚本：`yodo.run` + `pageForOrigin` + `page.goto` + `page.evaluate` 在页内重放（只发网络请求，不操作 DOM）。闭包 return 业务数据，不要写 `url` 字段。同一接口最多 5 次有 `status` 的尝试。`success` 后 `mv` 进 `task/` 再跑并报告；检验 URL 由 agent 看脚本现拼。
+   可观察结果：出现过 `status: success`，脚本已在 `task/`，并对人讲了结果；或 5 次 `failure` 后停，写清接口、原因、试了什么。没出现过 `success` 不准进 `task/`。

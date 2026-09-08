@@ -1,0 +1,16 @@
+按「经常一起做、共享同一组材料」归类。只覆盖用户任务；立 `.yodo` / Node / Chrome 安装不在这里。
+
+1. 跑脚本
+   覆盖：跑已有 task、组合现有 task。
+   共享：`.yodo/task/`、`.yodo/tmp/`、自执行脚本的 stdout（`success` / `failure` / `need-*`）、对人报告 `result` / `resultFile`。检验 URL 由 agent 看 task 脚本现拼（path + query），不从脚本 return 里取。
+   材料：`node task/<name>.js`、`node tmp/<name>.js`、Unix `mv`。`start.js` / `stop.js` 不是主路径（需要浏览器的命令会自己连；用户要求断开才 `stop.js`）。
+
+2. 录抓包
+   覆盖：录用户操作（含 abort）。
+   共享：`src/bin/record-start.js` / `record-stop.js` / `record-abort.js`，stdout `recording` / `stopped` / `aborted` / `idle`，归档后的 `record/<name>/`。
+   材料：`timeline.jsonl`、`01_GET_host.json`、拆出的 `*.response.json` / `*.response.html`。正在录时不读 `record/.active/`。
+
+3. 写重放
+   覆盖：对着抓包写出脚本。
+   共享：抓包目录 + `tmp/` 新脚本 + `_common/yodo.js` 暴露的 API：`yodo.run`、`pageForOrigin`、`serializeUrl` / `parseUrl`（给 `goto` 用，不要拿来写 return 的 `url`）；page 上实际会用到的是 `goto`、`evaluate`（`url` / `title` / `close` / `bringToFront` / `newPage` 存在，写重放的正路是复用 origin 页再页内发请求）。
+   材料：同一接口最多 5 次有 `status` 的尝试；`success` 后 `mv` 进 `task/`。
