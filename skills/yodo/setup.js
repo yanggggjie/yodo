@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
+import { stopCurrentHolder } from "./src/cli/spawn.ts";
 
 const major = Number(process.versions.node.split(".")[0]);
 if (!Number.isFinite(major) || major < 24) {
@@ -19,6 +20,7 @@ const SRC = path.join(HERE, "src");
 const DEST = path.join(os.homedir(), ".yodo", "src");
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
+await stopCurrentHolder();
 copyRuntime(SRC, DEST);
 console.log(`yodo src 拷贝 → ${DEST}`);
 

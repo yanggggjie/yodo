@@ -4,14 +4,12 @@
 
 做不成会说明原因。
 
-## 安装
+## 安装或更新
 
 把下面整段复制给你的 agent：
 
 ```
-请安装 yodo。先执行：
-npx skills add yanggggjie/yodo -g -y -a '*' -s yodo
-再读取并严格执行这份说明：
+请安装或更新 yodo。读取并严格执行这份说明：
 https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 ```
 

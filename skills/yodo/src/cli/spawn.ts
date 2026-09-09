@@ -189,19 +189,24 @@ export async function rpcExistingSession(
   }
 }
 
+/** SIGTERM 一个 pid 并等到它退出或超时。setup 停旧 holder 也走这条。 */
+export async function stopPid(pid: number, ms = 5_000): Promise<void> {
+  if (!isPidAlive(pid)) return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline && isPidAlive(pid)) await sleep(50);
+}
+
 export async function stopCurrentHolder(ms = 5_000): Promise<void> {
   const pid = readSessionPid();
   if (!pid || !isPidAlive(pid)) {
     clearStaleSession();
     return;
   }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    clearStaleSession();
-    return;
-  }
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline && isPidAlive(pid)) await sleep(50);
+  await stopPid(pid, ms);
   clearStaleSession();
 }
