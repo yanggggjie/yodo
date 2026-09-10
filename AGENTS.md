@@ -39,7 +39,7 @@ npm run verify:pack  # 隔离 HOME 真跑 skills add + setup + doctor
 
 对外：`src/sdk.ts`（`yodo` SDK）+ `src/bin/*.js`（薄脚本）+ 自执行 task。
 
-- **holder**（`src/holder.ts`，常驻）：持有**一条** CDP 连接 = 续着 Chrome 远程调试授权（实测：连接归零授权即失效，所以必须常驻）。socket 上暴露**高层 op**：`run.begin/end`、`page.for-origin/goto/evaluate/url/title/close/bring-to-front`、`context.new-page`、`record.*`、`ping`。同时只允许一个 run；run 绑发起它的那条 socket 连接，连接断开（含 client 崩溃）即 `run.end` 清理。
+- **holder**（`src/holder.ts`，常驻）：持有**一条** CDP 连接 = 续着 Chrome 远程调试授权（实测：连接归零授权即失效，所以必须常驻）。socket 上暴露**高层 op**：`run.begin/end`、`page.goto/evaluate/url/title/close/bring-to-front`、`context.new-page`、`record.*`、`ping`。同时只允许一个 run；run 绑发起它的那条 socket 连接，连接断开（含 client 崩溃）即 `run.end` 清理。
 - **client**（`src/sdk.ts`）：`yodo.run(fn)` 在**本进程**跑 task 闭包；`browserContext`/`page` 是 proxy，方法经 socket 发 op 给 holder，holder 在那条连接上执行 CDP 回传结果。`page.evaluate(fn,args)` 由 client 把 `fn.toString()`+args 拼成表达式发过去。
 - **record**：仍在 holder 侧采集（复用 `record/*`），client 只发 `record.*` op。
 
@@ -51,10 +51,9 @@ holder 对每个 op 回 `ok`；task 的业务结果由 client 侧 `yodo.run` 拼
 
 ## CDP attach
 
-- 录制期间不要 browser 级 `Target.setAutoAttach`。只 `attachToTarget` 录制窗里的 page；popup 靠该 page session 上 related `setAutoAttach`（`waitForDebuggerOnStart: false`，`filter: [{ type: "page" }]`）。sibling 新 tab 用 `Target.setDiscoverTargets` 通知后再按 `windowId` 决定是否 attach。别人窗零 CDP。`chrome://` / `devtools://` 不 attach。idle holder 只留 CDP WebSocket，`autoAttach: false`，`discover: false`。`page.for-origin` op 按 origin 只挂一个 page，不全量 attach。
-- 演示 / record：新窗口前台（`newWindow: true`），`stop` / `abort` / 超时后关掉这一扇录制窗。
-- run：`run.begin` 开一扇后台新窗（`newWindow: true`、`background: true`、`focus: false`）。`pageForOrigin` / `newPage` 只用这扇窗里的 tab，不挂用户已有 tab。`run.end` 关掉这扇窗；若会关到 Chrome 只剩它，先开一扇后台空白窗。
-- `pageForOrigin`：只复用本 run 窗里同 origin 的 page；没有就在该窗现有 tab 上 goto。
+- 录制期间不要 browser 级 `Target.setAutoAttach`。只 `attachToTarget` 录制窗里的 page；popup 靠该 page session 上 related `setAutoAttach`（`waitForDebuggerOnStart: false`，`filter: [{ type: "page" }]`）。sibling 新 tab 用 `Target.setDiscoverTargets` 通知后再按 `windowId` 决定是否 attach。别人窗零 CDP。`chrome://` / `devtools://` 不 attach。idle holder 只留 CDP WebSocket，`autoAttach: false`，`discover: false`。
+- 演示 / record：新窗口后台（`newWindow: true`、`background: true`、`focus: false`），空白 tab 的 `document.title` 设为 `yodo record`。不 `Page.bringToFront`。`stop` / `abort` / 超时后关掉这一扇录制窗。
+- run：`run.begin` 确保一扇后台窗（没有或已被关就开；`newWindow: true`、`background: true`、`focus: false`；唯一 tab 标题 `yodo run`）。`newPage` 还这个 tab（先 `goto about:blank`），不新开 tab，不挂用户已有 tab。CDP 不能在不抢前台的情况下把新 tab 开进指定窗。`run.end` 再 `goto about:blank` 并把标题改回 `yodo run`，不关窗。holder 停才关整扇窗；若会关到 Chrome 只剩它，先开一扇后台空白窗。用户把窗关了，下次 `run.begin` 再开一扇。
 - `goto` 没有 `waitUntil`。
 
 ## 收尾与过滤

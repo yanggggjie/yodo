@@ -3,6 +3,8 @@ import {
   CdpContext,
   CdpPage,
   PAGE_AUTO_ATTACH,
+  RECORD_WINDOW_TITLE,
+  RUN_WINDOW_TITLE,
   envelopeCdpCommand,
   isChromeUiUrl,
   setDiscoverTargets,
@@ -132,28 +134,62 @@ assert.ok(!initSent.includes("Runtime.runIfWaitingForDebugger"));
 assert.equal(ctx.pages().length, 0);
 
 const originSent: { method: string; params?: Record<string, unknown> }[] = [];
+const runTargets = new Map<string, number>();
+const originHandlers = new Map<string, Set<(params: unknown, sessionId?: string) => void>>();
 const originRaw: RawCdpConnection = {
   browserSessionId: "browser",
   commandTimeoutMs: 15_000,
-  send: async (method, params) => {
+  send: async (method, params, sessionId) => {
     originSent.push({ method, params });
     if (method === "Target.createTarget") {
+      assert.equal(params?.windowId, undefined);
       assert.equal(params?.newWindow, true);
       assert.equal(params?.background, true);
       assert.equal(params?.focus, false);
-      return { targetId: "run-tab" };
+      runTargets.set("run-anchor", 42);
+      return { targetId: "run-anchor" };
     }
-    if (method === "Browser.getWindowForTarget") return { windowId: 42 };
+    if (method === "Target.getTargets") {
+      return {
+        targetInfos: [...runTargets.keys()].map((targetId) => ({ targetId, type: "page" })),
+      };
+    }
+    if (method === "Browser.getWindowForTarget") {
+      const id = (params as { targetId?: string })?.targetId;
+      const w = id ? runTargets.get(id) : undefined;
+      if (w == null) throw new Error("no window");
+      return { windowId: w };
+    }
     if (method === "Target.attachToTarget") {
       return { sessionId: `s-${(params as { targetId?: string })?.targetId}` };
+    }
+    if (method === "Page.navigate") {
+      queueMicrotask(() => {
+        for (const h of originHandlers.get("Page.loadEventFired") ?? []) {
+          h({}, sessionId);
+        }
+      });
+      return { frameId: "f1" };
     }
     if (method === "Runtime.evaluate") {
       return { result: { type: "string", value: "ok" } };
     }
-    if (method === "Page.navigate") return { frameId: "f1" };
+    if (method === "Target.closeTarget") {
+      const id = (params as { targetId?: string })?.targetId;
+      if (id) runTargets.delete(id);
+      return {};
+    }
     return {};
   },
-  on: () => () => {},
+  on: (method, handler) => {
+    let set = originHandlers.get(method);
+    if (!set) {
+      set = new Set();
+      originHandlers.set(method, set);
+    }
+    set.add(handler);
+    return () => set.delete(handler);
+  },
   onClose: () => () => {},
   isClosed: () => false,
   close: async () => {},
@@ -161,15 +197,28 @@ const originRaw: RawCdpConnection = {
 const originCtx = new CdpContext(originRaw);
 await originCtx.init();
 const runPage = await originCtx.openRunWindow();
-assert.equal(runPage.targetId, "run-tab");
-const originPage = await originCtx.pageForOrigin("https://a.com");
-assert.equal(originPage.targetId, "run-tab");
-assert.equal((await originCtx.newPage()).targetId, "run-tab");
+assert.equal(runPage.targetId, "run-anchor");
+assert.ok(
+  originSent.some(
+    (s) =>
+      s.method === "Runtime.evaluate" &&
+      String(s.params?.expression ?? "").includes(RUN_WINDOW_TITLE),
+  ),
+);
+const work = await originCtx.newPage();
+assert.equal(work.targetId, "run-anchor");
 assert.equal(originSent.filter((s) => s.method === "Target.createTarget").length, 1);
-assert.ok(!originSent.some((s) => s.method === "Target.getTargets"));
+assert.ok(!originSent.some((s) => String(s.params?.expression ?? "").includes("window.open")));
+await originCtx.openRunWindow();
+assert.equal(originSent.filter((s) => s.method === "Target.createTarget").length, 1);
+const beforeEnd = originSent.filter((s) => s.method === "Target.closeTarget").length;
+await originCtx.endRunTabs();
+assert.equal(originSent.filter((s) => s.method === "Target.closeTarget").length, beforeEnd);
 assert.ok(originSent.some((s) => s.method === "Page.navigate"));
+const work2 = await originCtx.newPage();
+assert.equal(work2.targetId, "run-anchor");
 await originCtx.closeRunWindow();
-assert.ok(originSent.some((s) => s.method === "Target.closeTarget"));
+assert.ok(originSent.some((s) => s.method === "Target.closeTarget" && s.params?.targetId === "run-anchor"));
 
 const recSent: { method: string; params?: Record<string, unknown> }[] = [];
 const recRaw: RawCdpConnection = {
@@ -179,12 +228,16 @@ const recRaw: RawCdpConnection = {
     recSent.push({ method, params });
     if (method === "Target.createTarget") {
       assert.equal(params?.newWindow, true);
-      assert.equal(params?.background, undefined);
+      assert.equal(params?.background, true);
+      assert.equal(params?.focus, false);
       return { targetId: "rec-tab" };
     }
     if (method === "Browser.getWindowForTarget") return { windowId: 7 };
     if (method === "Target.attachToTarget") {
       return { sessionId: `s-${(params as { targetId?: string })?.targetId}` };
+    }
+    if (method === "Runtime.evaluate") {
+      return { result: { type: "string", value: "ok" } };
     }
     return {};
   },
@@ -197,6 +250,13 @@ const recCtx = new CdpContext(recRaw);
 const rec = await recCtx.openRecordWindow();
 assert.equal(rec.page.targetId, "rec-tab");
 assert.equal(rec.windowId, 7);
-assert.ok(recSent.some((s) => s.method === "Page.bringToFront"));
+assert.ok(!recSent.some((s) => s.method === "Page.bringToFront"));
+assert.ok(
+  recSent.some(
+    (s) =>
+      s.method === "Runtime.evaluate" &&
+      String(s.params?.expression ?? "").includes(RECORD_WINDOW_TITLE),
+  ),
+);
 
 console.log("browser session selfcheck ok");

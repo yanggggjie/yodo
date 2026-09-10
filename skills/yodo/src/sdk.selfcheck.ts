@@ -1,5 +1,5 @@
 // sdk 客户端全链路自检：用 mock holder（socket）代替真 Chrome，验证
-// ensureHolder(ping) → HolderConn 多 op → run.begin/for-origin/goto/evaluate/run.end
+// ensureHolder(ping) → HolderConn 多 op → run.begin/new-page/goto/evaluate/run.end
 // → fn+args 序列化把参数带到了 holder → success JSON 直出。
 import * as assert from "node:assert";
 import * as fs from "node:fs";
@@ -29,7 +29,7 @@ const server = net.createServer((sock) => {
       seen.push(req.op);
       let res: Record<string, unknown> = { id: req.id, ok: true };
       if (req.op === "ping") res = { id: req.id, ok: true, pid: process.pid, chrome: "mock", pages: 0, record: null };
-      else if (req.op === "page.for-origin") res = { id: req.id, ok: true, pageId: "P1", url: req.origin };
+      else if (req.op === "context.new-page") res = { id: req.id, ok: true, pageId: "P1", url: "about:blank" };
       else if (req.op === "page.evaluate") res = { id: req.id, ok: true, value: { exprHasArg: String(req.expr).includes('"hi"') } };
       sock.write(`${JSON.stringify(res)}\n`);
     }
@@ -47,7 +47,7 @@ process.argv[1] = path.join(HOME, "faketask.js");
 
 try {
   await yodo.run(async ({ browserContext }) => {
-    const page = await browserContext.pageForOrigin("https://x.test");
+    const page = await browserContext.newPage();
     await page.goto("https://x.test/y");
     return page.evaluate(async (k: string) => ({ k }), "hi");
   });
@@ -63,7 +63,7 @@ assert.equal(parsed.status, "success", `期望 success，得到：${printed}`);
 assert.deepEqual(parsed.result, { exprHasArg: true }, "evaluate 的 fn+args 应把参数序列化传到 holder");
 assert.deepEqual(
   seen,
-  ["ping", "run.begin", "page.for-origin", "page.goto", "page.evaluate", "run.end"],
+  ["ping", "run.begin", "context.new-page", "page.goto", "page.evaluate", "run.end"],
   `op 顺序不对：${seen.join(",")}`,
 );
 assert.equal(process.exitCode ?? 0, 0, "success 不应设非零退出码");

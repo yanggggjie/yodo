@@ -173,7 +173,6 @@ export function formatRecordStartStdout(name: string): string {
     {
       status: "recording",
       name,
-      guide: "请在新窗口做一遍。好了告诉我。",
     },
     null,
     2,

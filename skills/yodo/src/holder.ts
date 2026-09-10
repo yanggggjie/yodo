@@ -97,7 +97,7 @@ async function settleIdle(): Promise<void> {
   const prev = browser.raw.commandTimeoutMs;
   browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
   try {
-    await context.detachAllPages().catch(warnCatch("detachAllPages"));
+    await context.detachAllPages(context.runKeepIds()).catch(warnCatch("detachAllPages"));
     await setPageAutoAttach(browser.raw, false);
     await setDiscoverTargets(browser.raw, false);
     await setIgnoreCertificateErrors(browser.raw, false);
@@ -106,14 +106,14 @@ async function settleIdle(): Promise<void> {
   }
 }
 
-/** 结束当前 run：detach、恢复 idle。socket 断开中途崩溃也走这里。 */
+/** 结束当前 run：tab 回到 about:blank，窗留下。socket 断开中途崩溃也走这里。 */
 async function runEnd(): Promise<void> {
   if (!activeRunConn) return;
   const conn = activeRunConn;
   activeRunConn = null;
   conn.runActive = false;
   if (browser) browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
-  await context?.closeRunWindow().catch(warnCatch("closeRunWindow"));
+  await context?.endRunTabs().catch(warnCatch("endRunTabs"));
   await settleIdle().catch(warnCatch("run end settle"));
 }
 
@@ -155,11 +155,6 @@ async function handleOp(req: SessionRequest, conn: ConnState): Promise<SessionRe
       case "run.end": {
         await runEnd();
         return { id, ok: true };
-      }
-      case "page.for-origin": {
-        if (!req.origin) return { id, ok: false, error: "page.for-origin 需要 origin" };
-        const p = await context!.pageForOrigin(req.origin);
-        return { id, ok: true, pageId: p.targetId, url: p.url() };
       }
       case "context.new-page": {
         const p = await context!.newPage();
@@ -263,6 +258,7 @@ async function shutdown(code: number): Promise<void> {
   if (liveRecordName()) {
     await finishRecord("disconnect").catch(warnCatch("disconnect flush"));
   }
+  await context?.closeRunWindow().catch(warnCatch("closeRunWindow"));
   await settleIdle().catch(warnCatch("settleIdle"));
   server?.close();
   if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true });

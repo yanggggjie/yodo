@@ -150,7 +150,7 @@ assert.equal(req4.responseBody, undefined);
 const recording = JSON.parse(formatRecordStartStdout("demo")) as Record<string, unknown>;
 assert.equal(recording.status, "recording");
 assert.equal(recording.name, "demo");
-assert.equal(typeof recording.guide, "string");
+assert.equal(recording.guide, undefined);
 assert.equal(recording.recordDir, undefined);
 
 fs.rmSync(dir, { recursive: true, force: true });

@@ -156,11 +156,6 @@ export class ProxyContext {
     this.conn = conn;
   }
 
-  async pageForOrigin(origin: string): Promise<ProxyPage> {
-    const r = await this.conn.send("page.for-origin", { origin });
-    return new ProxyPage(this.conn, r.pageId!, r.url ?? origin);
-  }
-
   async newPage(): Promise<ProxyPage> {
     const r = await this.conn.send("context.new-page", {});
     return new ProxyPage(this.conn, r.pageId!, r.url ?? "about:blank");

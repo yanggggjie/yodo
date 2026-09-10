@@ -13,7 +13,7 @@ for (const name of ["task", "tmp", "record", "session"]) {
 assert.ok(fs.existsSync(path.join(home, "record", ".active")));
 assert.ok(!fs.existsSync(path.join(home, "handbook")));
 assert.ok(!fs.existsSync(path.join(home, "learn")));
-assert.ok(fs.existsSync(path.join(home, "task", "_common", "page-for-origin.js")));
+assert.ok(!fs.existsSync(path.join(home, "task", "_common", "page-for-origin.js")));
 assert.ok(fs.existsSync(path.join(home, "task", "_common", "url.js")));
 assert.ok(!fs.existsSync(path.join(home, "task", "_common", "effect-after-run.js")));
 assert.ok(fs.existsSync(path.join(home, "task", "package.json")));

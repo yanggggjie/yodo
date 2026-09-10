@@ -2,7 +2,6 @@ export type SessionOp =
   | "ping"
   | "run.begin"
   | "run.end"
-  | "page.for-origin"
   | "page.goto"
   | "page.evaluate"
   | "page.url"
@@ -34,8 +33,6 @@ export type SessionRequest = {
   op: SessionOp;
   /** page.* 目标页句柄（= CDP targetId） */
   pageId?: string;
-  /** page.for-origin */
-  origin?: string;
   /** page.goto */
   url?: string;
   /** page.evaluate：已拼好的表达式（client 侧把 fn+args 序列化） */
@@ -59,9 +56,9 @@ export type SessionResponse = {
   chrome?: string;
   pages?: number;
   record?: string | null;
-  /** page.for-origin / context.new-page */
+  /** context.new-page */
   pageId?: string;
-  /** page.for-origin / page.url / context.new-page */
+  /** page.url / context.new-page */
   url?: string;
   /** page.title */
   title?: string;
