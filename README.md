@@ -1,8 +1,9 @@
 # yodo
+you noly do once：只需要你演示一次
 
-用本机已经登录的 Chrome 做事。你在 Chrome 里能做的，也可以让它做。
+用本机已经登录的 Chrome 完成任务。你在 Chrome 里能做的，也可以让它做。做不成它会说明原因。
 
-做不成会说明原因。
+速度快，省token
 
 ## 安装或更新
 
@@ -29,11 +30,11 @@ yodo 打开我的 X，总结我的关注最近三条是什么
 yodo 搜小红书「东京咖啡」，把前三条标题给我
 ```
 
-第一次连 Chrome 时，agent 会把要点念给你（开 Chrome、勾 remote-debugging、点 Allow）。做完回「好了」即可。
+第一次连 Chrome 时，agent 会把要点告诉你（开 Chrome、勾 remote-debugging、点 Allow）。做完回「好了」即可。
 
-## 同一任务比一次
+## 性能对比
 
-[browser-use](https://github.com/browser-use/browser-use) 和 [agent-browser](https://github.com/vercel-labs/agent-browser) 都是看着页面点。yodo 第一次请你在 Chrome 里做一遍，把请求写成脚本；之后同一类事直接跑脚本。
+[browser-use](https://github.com/browser-use/browser-use) 和 [agent-browser](https://github.com/vercel-labs/agent-browser) 都是看着页面点。yodo 第一次请你在 Chrome 里演示一遍，然后学习请求写成脚本；之后同类或相关任务直接跑脚本。
 
 下面是同一个跨站任务，各跑一次：从 X 关注里取最近 3 条，写成中文摘要，发到知乎想法和即刻。
 
@@ -43,9 +44,13 @@ yodo 搜小红书「东京咖啡」，把前三条标题给我
 
 ![花费](bench/cost.svg)
 
-`yodo (run)` 在第一行：`task` 已经在了，只跑、不再录、不再写脚本。`yodo (learn)` 在最后一行：人做一遍、写出 `task`，并顺带做完同一件事。同类能力只学一次；学到的是这次录到的请求怎么发，下次换参数，或和别的 `task` 拼起来用。
+`yodo (run)` ：`task` 已学会，只跑、不再录、不再写脚本。
 
-各家各跑了一次，不是多次平均。
+`yodo (learn)` ：`task` 未学会，你先演示，然后 agent 学习，写出 `task`。
+
+同类能力只学一次；学到的是这次录到的请求怎么发，下次换参数，或和别的 `task` 拼起来跑。
+
+各跑了一次，不是多次平均。
 
 | | 成功 | 耗时 | 花费 |
 |--|--|--|--|
@@ -54,11 +59,9 @@ yodo 搜小红书「东京咖啡」，把前三条标题给我
 | browser-use | 是 | 9 分 45 秒 | $0.93 |
 | yodo (learn) | 是 | 6 分 46 秒 | $0.83 |
 
-三家都发出来了。知乎想法和即刻动态都能对上，摘要后缀是对应工具名。
-
 ### 为什么差这么多
 
-另外两家每做一步都要再看一眼页面：现在长什么样、点哪里、填什么，都得再喂给模型。步骤一多，时间和花费一起涨。
+另外两种每做一步都要再看一眼页面：现在长什么样、点哪里、填什么，都得再喂给模型。步骤多，时间和花费高。
 
 yodo 拆成两段：
 
@@ -69,11 +72,11 @@ yodo 拆成两段：
 
 代码比「看了再点、点了再看」更短，也更稳。
 
-这样比，只对有稳定接口的站点公平。要靠认图、过验证码，或站点已经有现成 API 的，不拿来当主要结论。
 
 ### 登录态怎么处理
 
-**跑的时候。** cookie 还在本机 Chrome 里。agent 写的是到页面里去 `fetch`（`credentials: "include"`），自己不读 cookie。接口返回的业务数据会回到 agent——摘要、帖子 id 本来就要回来，任务才能做完。这是默认写法，不是沙箱：skill 要求走页内 `fetch`、不操作 DOM；如果执意去读 `document.cookie`，设计拦不住。
+**跑的时候。** cookie 还在本机 Chrome 里。
+agent 写的是到页面里去 `fetch`（`credentials: "include"`），自己不读 cookie。
 
 **学的时候。** 录下来的请求落盘前会把敏感值换成稳定的 alias。cookie 的名字还在，值没了；token 也一样。agent 能看出「有一个叫 `sid` 的 cookie，这是 JWT」，所以写得出重放脚本，但拿不到原始值。同一段原始值会映射到同一个 `secret_NNN`。
 
@@ -103,7 +106,7 @@ Authorization: Bearer ⟨secret_001:jwt:bytes=11⟩
 
 **源码在本机。** 跑的代码和这次的 `task` / `record` / `session` 都在 `~/.yodo`，可以打开看。skill 也是源码直接分发，不是封装好的二进制。
 
-### 学不会的，和账号
+### 限制和风险
 
 有的接口会学不会。常见是发帖、支付、验证码这类：页面脚本和服务端会交叉校验一次性参数或设备信息，只把录到的请求再发一遍不够。这时 yodo 会说学不会，而不是硬编。
 
