@@ -1,0 +1,5 @@
+{
+  "code-runner.executorMap": {
+    "javascript": "node"
+  }
+}

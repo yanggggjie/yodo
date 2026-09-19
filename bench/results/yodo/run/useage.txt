@@ -1,0 +1,10 @@
+Session
+
+Total cost:            $0.2379
+Total duration (API):  39s
+Total duration (wall): 56s
+Total code changes:    0 lines added, 0 lines removed
+Usage by model:
+    claude-haiku-4-5:  975 input, 40 output, 0 cache read, 0 cache write ($0.0012)
+     claude-sonnet-5:  12 input, 1.0k output, 235.3k cache read, 71.8k cache write ($0.2368)
+Prompt cache (main):   6 requests · 77% of input tokens from cache · 2 misses (last 38s ago, 24.9k tokens re-cached) · warm (5m TTL, last activity 16s ago)

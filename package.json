@@ -1,0 +1,17 @@
+{
+  "name": "yodo-skill-repo",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Dev harness for the yodo skill; the shippable package lives in skills/yodo/src.",
+  "scripts": {
+    "check": "npm --prefix skills/yodo/src run check",
+    "test": "npm --prefix skills/yodo/src run test",
+    "dev:install": "npx -y skills add . -s yodo -g -a '*' -y && node skills/yodo/setup.js",
+    "verify:pack": "node scripts/verify-pack.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

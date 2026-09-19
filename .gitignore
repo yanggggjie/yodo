@@ -1,0 +1,14 @@
+# 运行时 / 本地数据
+.yodo/
+*.har
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+.DS_Store
+
+# 覆盖全局 excludes：本仓库跟踪 AGENTS.md
+!AGENTS.md
+
+.idea

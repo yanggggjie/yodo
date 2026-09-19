@@ -1,0 +1,1039 @@
+/**
+ * Raw CDP attach + session / page。
+ * 只给 holder 用 connectChrome；record / exec 只用已有句柄。
+ */
+import { NeedAllowError, resolveWsEndpoint } from "./connect.ts";
+import { timeoutReject } from "../utils/async.ts";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS } from "../utils/constants.ts";
+import { createLogger } from "../utils/logger.ts";
+
+const logger = createLogger("browser");
+
+/** ponytail: flatten 下 envelope；升级 Playwright 不影响此路径 */
+export function envelopeCdpCommand(
+  id: number,
+  method: string,
+  params: Record<string, unknown> = {},
+  sessionId?: string,
+): Record<string, unknown> {
+  const msg: Record<string, unknown> = { id, method, params };
+  if (sessionId) msg.sessionId = sessionId;
+  return msg;
+}
+
+type Pending = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+  method: string;
+};
+
+export type RawCdpConnection = {
+  browserSessionId: string;
+  commandTimeoutMs: number;
+  rpc?: { id: string; op: string };
+  send: (
+    method: string,
+    params?: Record<string, unknown>,
+    sessionId?: string,
+  ) => Promise<unknown>;
+  on: (
+    method: string,
+    handler: (params: unknown, sessionId?: string) => void,
+  ) => () => void;
+  onClose: (handler: () => void) => () => void;
+  isClosed: () => boolean;
+  close: () => Promise<void>;
+};
+
+let sharedRawConnection: RawCdpConnection | null = null;
+
+async function getSharedRawCdp(wsUrl?: string): Promise<RawCdpConnection> {
+  if (sharedRawConnection && !sharedRawConnection.isClosed()) {
+    return sharedRawConnection;
+  }
+  const endpoint = wsUrl ?? (await resolveWsEndpoint());
+  sharedRawConnection = await connectRawCdp(endpoint);
+  return sharedRawConnection;
+}
+
+async function closeSharedRawCdp(): Promise<void> {
+  if (sharedRawConnection) {
+    const conn = sharedRawConnection;
+    sharedRawConnection = null;
+    await conn.close().catch(() => {});
+  }
+}
+
+export async function connectRawCdp(wsUrl: string): Promise<RawCdpConnection> {
+  const ws = new WebSocket(wsUrl);
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener("open", () => resolve(), { once: true });
+    const fail = () => reject(new NeedAllowError());
+    ws.addEventListener("error", fail, { once: true });
+    ws.addEventListener("close", fail, { once: true });
+  });
+
+  let nextId = 1;
+  let closed = false;
+  let commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
+  let rpc: { id: string; op: string } | undefined;
+  const pending = new Map<number, Pending>();
+  const listeners = new Map<string, Set<(params: unknown, sessionId?: string) => void>>();
+  const closeHandlers = new Set<() => void>();
+
+  const logSendFail = (method: string, ms: number, err: Error): void => {
+    logger.warn(err.message, {
+      method,
+      ms,
+      err: err.message,
+      ...(rpc ?? {}),
+    });
+  };
+
+  const rejectAll = (reason: string): void => {
+    for (const [id, entry] of pending) {
+      if (entry.timer) clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(new Error(reason));
+    }
+  };
+
+  ws.addEventListener("message", (event) => {
+    let msg: {
+      id?: number;
+      method?: string;
+      params?: unknown;
+      sessionId?: string;
+      result?: unknown;
+      error?: { message?: string };
+    };
+    try {
+      msg = JSON.parse(String(event.data)) as typeof msg;
+    } catch {
+      return;
+    }
+
+    if (msg.id != null && pending.has(msg.id)) {
+      const entry = pending.get(msg.id)!;
+      if (entry.timer) clearTimeout(entry.timer);
+      pending.delete(msg.id);
+      if (msg.error) {
+        const err = new Error(msg.error.message ?? "raw CDP error");
+        logSendFail(entry.method, 0, err);
+        entry.reject(err);
+      } else {
+        entry.resolve(msg.result);
+      }
+      return;
+    }
+
+    if (!msg.method) return;
+    const handlers = listeners.get(msg.method);
+    if (!handlers?.size) return;
+    for (const handler of handlers) {
+      try {
+        handler(msg.params, msg.sessionId);
+      } catch (error) {
+        logger.warn("raw CDP handler fail", {
+          method: msg.method,
+          err: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    closed = true;
+    rejectAll("raw CDP WebSocket closed");
+    for (const handler of closeHandlers) {
+      try {
+        handler();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  const send = (
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string,
+    timeoutMs?: number,
+  ): Promise<unknown> => {
+    if (closed) return Promise.reject(new Error("raw CDP closed"));
+    const ms = timeoutMs ?? commandTimeoutMs;
+    const id = nextId++;
+    const payload = JSON.stringify(envelopeCdpCommand(id, method, params, sessionId));
+    return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (ms > 0) {
+        timer = setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            const err = new Error(`CDP command timed out after ${ms}ms: ${method}`);
+            logSendFail(method, ms, err);
+            reject(err);
+          }
+        }, ms);
+        timer.unref?.();
+      }
+      pending.set(id, { resolve, reject, timer, method });
+      ws.send(payload);
+    });
+  };
+
+  const on = (
+    method: string,
+    handler: (params: unknown, sessionId?: string) => void,
+  ): (() => void) => {
+    let set = listeners.get(method);
+    if (!set) {
+      set = new Set();
+      listeners.set(method, set);
+    }
+    set.add(handler);
+    return () => {
+      set!.delete(handler);
+      if (set!.size === 0) listeners.delete(method);
+    };
+  };
+
+  const onClose = (handler: () => void): (() => void) => {
+    closeHandlers.add(handler);
+    return () => {
+      closeHandlers.delete(handler);
+    };
+  };
+
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    rejectAll("raw CDP closing");
+    ws.close();
+    await new Promise<void>((resolve) => {
+      if (ws.readyState === WebSocket.CLOSED) {
+        resolve();
+        return;
+      }
+      ws.addEventListener("close", () => resolve(), { once: true });
+    });
+  };
+
+  logger.info("raw CDP connected");
+  const attached = (await send("Target.attachToBrowserTarget")) as {
+    sessionId: string;
+  };
+  const browserSessionId = attached.sessionId;
+
+  const conn: RawCdpConnection = {
+    browserSessionId,
+    get commandTimeoutMs() {
+      return commandTimeoutMs;
+    },
+    set commandTimeoutMs(v: number) {
+      commandTimeoutMs = v;
+    },
+    get rpc() {
+      return rpc;
+    },
+    set rpc(v: { id: string; op: string } | undefined) {
+      rpc = v;
+    },
+    send,
+    on,
+    onClose,
+    isClosed: () => closed,
+    close,
+  };
+  return conn;
+}
+
+export const PAGE_AUTO_ATTACH = {
+  autoAttach: true,
+  flatten: true,
+  waitForDebuggerOnStart: false,
+  filter: [{ type: "page" }],
+} as const;
+
+/** 录制空白 tab 的 document.title，给人在后台找到这扇窗。 */
+export const RECORD_WINDOW_TITLE = "yodo record";
+/** run 窗里那一个 tab 的 document.title（idle 时）。 */
+export const RUN_WINDOW_TITLE = "yodo run";
+
+export function isChromeUiUrl(url: string): boolean {
+  return url.startsWith("chrome://") || url.startsWith("devtools://");
+}
+
+/** page session only when enabling. browser session may only turn it off. */
+export function setPageAutoAttach(
+  raw: Pick<RawCdpConnection, "send" | "browserSessionId">,
+  enabled: boolean,
+  sessionId?: string,
+): Promise<unknown> {
+  const sid = sessionId ?? raw.browserSessionId;
+  if (enabled && sid === raw.browserSessionId) {
+    return Promise.resolve();
+  }
+  return raw
+    .send(
+      "Target.setAutoAttach",
+      {
+        autoAttach: enabled,
+        flatten: true,
+        waitForDebuggerOnStart: false,
+        filter: PAGE_AUTO_ATTACH.filter,
+      },
+      sid,
+    )
+    .catch((err) => {
+      logger.warn("setPageAutoAttach failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+}
+
+export function setDiscoverTargets(
+  raw: Pick<RawCdpConnection, "send">,
+  discover: boolean,
+): Promise<unknown> {
+  return raw.send("Target.setDiscoverTargets", { discover }).catch((err) => {
+    logger.warn("setDiscoverTargets failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+export function setIgnoreCertificateErrors(
+  raw: Pick<RawCdpConnection, "send">,
+  ignore: boolean,
+): Promise<unknown> {
+  return raw.send("Security.setIgnoreCertificateErrors", { ignore }).catch((err) => {
+    logger.warn("setIgnoreCertificateErrors failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+export type EvaluateFn<T = unknown> = (...args: any[]) => T | Promise<T>;
+
+export class CdpPage {
+  readonly targetId: string;
+  readonly sessionId: string;
+  private raw: RawCdpConnection;
+  private currentUrl: string;
+  private closed = false;
+  private consoleListeners: Set<(msg: string) => void> = new Set();
+  private inited = false;
+  private offs: Array<() => void> = [];
+
+  constructor(
+    raw: RawCdpConnection,
+    targetId: string,
+    sessionId: string,
+    initialUrl = "about:blank",
+  ) {
+    this.raw = raw;
+    this.targetId = targetId;
+    this.sessionId = sessionId;
+    this.currentUrl = initialUrl;
+    this.initListeners();
+  }
+
+  private initListeners(): void {
+    this.offs.push(
+      this.raw.on("Page.frameNavigated", (params, sessId) => {
+        if (sessId !== this.sessionId) return;
+        const data = params as { frame: { id: string; parentId?: string; url: string } };
+        if (!data?.frame?.parentId && data.frame.url) {
+          this.currentUrl = data.frame.url;
+        }
+      }),
+    );
+
+    this.offs.push(
+      this.raw.on("Page.javascriptDialogOpening", async (_params, sessId) => {
+        if (sessId !== this.sessionId) return;
+        await this.raw
+          .send("Page.handleJavaScriptDialog", { accept: true }, this.sessionId)
+          .catch(() => {});
+      }),
+    );
+
+    this.offs.push(
+      this.raw.on("Runtime.consoleAPICalled", (params, sessId) => {
+        if (sessId !== this.sessionId) return;
+        const data = params as {
+          type: string;
+          args: { type: string; value?: unknown; description?: string }[];
+        };
+        const text = (data.args || [])
+          .map((a) => (a.value !== undefined ? String(a.value) : a.description || ""))
+          .join(" ");
+        for (const listener of this.consoleListeners) {
+          try {
+            listener(`[page:${data.type}] ${text}`);
+          } catch {
+            /* ignore */
+          }
+        }
+      }),
+    );
+  }
+
+  async initPage(): Promise<void> {
+    if (this.inited || this.closed) return;
+    this.inited = true;
+    await Promise.all([
+      this.raw.send("Page.enable", {}, this.sessionId).catch(() => {}),
+      this.raw.send("Runtime.enable", {}, this.sessionId).catch(() => {}),
+      this.raw.send("Page.setBypassCSP", { enabled: true }, this.sessionId).catch(() => {}),
+    ]);
+  }
+
+  onConsole(listener: (msg: string) => void): () => void {
+    this.consoleListeners.add(listener);
+    return () => this.consoleListeners.delete(listener);
+  }
+
+  url(): string {
+    return this.currentUrl;
+  }
+
+  isClosed(): boolean {
+    return this.closed;
+  }
+
+  markClosed(): void {
+    this.closed = true;
+    for (const off of this.offs) off();
+    this.offs = [];
+    this.consoleListeners.clear();
+  }
+
+  async title(): Promise<string> {
+    if (this.closed) return "";
+    try {
+      return (await this.evaluate<string>("document.title")) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async bringToFront(): Promise<void> {
+    if (this.closed) return;
+    await this.raw.send("Page.bringToFront", {}, this.sessionId).catch(() => {});
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.markClosed();
+    await this.raw.send("Target.closeTarget", { targetId: this.targetId }).catch(() => {});
+  }
+
+  async goto(
+    url: string,
+    options?: { timeout?: number },
+  ): Promise<void> {
+    if (this.closed) throw new Error("Target is closed");
+    const timeoutMs = options?.timeout ?? this.raw.commandTimeoutMs;
+
+    await this.initPage();
+
+    let cleanup: (() => void) | undefined;
+    const waitPromise = new Promise<void>((resolve) => {
+      const offDom = this.raw.on("Page.domContentEventFired", (_params, sessId) => {
+        if (sessId === this.sessionId) resolve();
+      });
+      const offLoad = this.raw.on("Page.loadEventFired", (_params, sessId) => {
+        if (sessId === this.sessionId) resolve();
+      });
+      const offNav = this.raw.on("Page.frameNavigated", (params, sessId) => {
+        if (sessId === this.sessionId) {
+          const data = params as { frame: { parentId?: string; url: string } };
+          if (!data?.frame?.parentId) resolve();
+        }
+      });
+      cleanup = () => {
+        offDom();
+        offLoad();
+        offNav();
+      };
+    });
+
+    try {
+      const navPromise = this.raw.send(
+        "Page.navigate",
+        { url },
+        this.sessionId,
+      ) as Promise<{ frameId?: string; errorText?: string }>;
+
+      const navResult = await Promise.race([
+        navPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`goto timeout after ${timeoutMs}ms: ${url}`)), timeoutMs),
+        ),
+      ]);
+
+      if (navResult?.errorText) {
+        throw new Error(`net navigation error: ${navResult.errorText}`);
+      }
+
+      await Promise.race([
+        waitPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+      ]);
+      this.currentUrl = url;
+    } finally {
+      cleanup?.();
+    }
+  }
+
+  async evaluate<T = unknown>(
+    fnOrString: string | EvaluateFn<T>,
+    ...args: unknown[]
+  ): Promise<T> {
+    if (this.closed) throw new Error("Target is closed");
+    await this.initPage();
+
+    let expression: string;
+    if (typeof fnOrString === "function") {
+      const fnStr = fnOrString.toString();
+      const serializedArgs = args.map((arg) => JSON.stringify(arg)).join(", ");
+      expression = `(async () => (${fnStr})(${serializedArgs}))()`;
+    } else {
+      expression = fnOrString;
+    }
+
+    let response: {
+      result?: { type?: string; value?: unknown; description?: string };
+      exceptionDetails?: {
+        text: string;
+        exception?: { description?: string; value?: unknown };
+      };
+    };
+    try {
+      response = (await this.raw.send(
+        "Runtime.evaluate",
+        {
+          expression,
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+        },
+        this.sessionId,
+      )) as typeof response;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/timed out/i.test(msg)) {
+        logger.warn(`evaluate timeout ${this.currentUrl}`, {
+          method: "Runtime.evaluate",
+          err: msg,
+        });
+      }
+      throw err;
+    }
+
+    if (response?.exceptionDetails) {
+      const desc =
+        response.exceptionDetails.exception?.description ||
+        response.exceptionDetails.text ||
+        "evaluate failed";
+      throw new Error(desc);
+    }
+
+    return response?.result?.value as T;
+  }
+
+  async domClick(selector: string): Promise<void> {
+    const point = await this.evaluate((value: string) => {
+      const element = document.querySelector(value);
+      if (!(element instanceof HTMLElement)) throw new Error(`DOM target not found: ${value}`);
+      element.scrollIntoView({ block: "center", inline: "center" });
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) throw new Error(`DOM target not visible: ${value}`);
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || (hit !== element && !element.contains(hit))) throw new Error(`DOM target obscured: ${value}`);
+      return { x, y };
+    }, selector);
+    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y }, this.sessionId);
+    await this.raw.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1 }, this.sessionId);
+    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", buttons: 0, clickCount: 1 }, this.sessionId);
+  }
+
+  async domFill(selector: string, value: string): Promise<void> {
+    await this.domClick(selector);
+    const modifier = process.platform === "darwin" ? 4 : 2;
+    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: modifier }, this.sessionId);
+    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: modifier }, this.sessionId);
+    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 }, this.sessionId);
+    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 }, this.sessionId);
+    await this.raw.send("Input.insertText", { text: value }, this.sessionId);
+    const actual = await this.evaluate((inputSelector: string) => {
+      const element = document.querySelector(inputSelector);
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value;
+      if (element instanceof HTMLElement && element.isContentEditable) return element.innerText;
+      throw new Error(`DOM fill target not editable: ${inputSelector}`);
+    }, selector);
+    if (actual !== value) throw new Error(`DOM fill value mismatch: ${selector}`);
+  }
+
+  async domPress(selector: string, key: string): Promise<void> {
+    await this.evaluate((inputSelector: string) => {
+      const element = document.querySelector(inputSelector);
+      if (!(element instanceof HTMLElement)) throw new Error(`DOM target not found: ${inputSelector}`);
+      element.focus();
+    }, selector);
+    const keys: Record<string, { code: string; vk: number }> = {
+      Enter: { code: "Enter", vk: 13 }, Escape: { code: "Escape", vk: 27 }, Tab: { code: "Tab", vk: 9 },
+      ArrowUp: { code: "ArrowUp", vk: 38 }, ArrowDown: { code: "ArrowDown", vk: 40 },
+      ArrowLeft: { code: "ArrowLeft", vk: 37 }, ArrowRight: { code: "ArrowRight", vk: 39 },
+      " ": { code: "Space", vk: 32 },
+    };
+    const info = keys[key];
+    if (!info) throw new Error(`Unsupported DOM key: ${key}`);
+    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code: info.code, windowsVirtualKeyCode: info.vk }, this.sessionId);
+    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key, code: info.code, windowsVirtualKeyCode: info.vk }, this.sessionId);
+  }
+
+  async domScroll(selector: string | undefined, deltaX: number, deltaY: number): Promise<void> {
+    const point = await this.evaluate((inputSelector?: string) => {
+      const element = inputSelector ? document.querySelector(inputSelector) : document.documentElement;
+      if (!(element instanceof Element)) throw new Error(`DOM scroll target not found: ${inputSelector}`);
+      if (inputSelector) element.scrollIntoView({ block: "center", inline: "center" });
+      const rect = element.getBoundingClientRect();
+      return { x: Math.max(1, Math.min(innerWidth - 1, rect.left + rect.width / 2)), y: Math.max(1, Math.min(innerHeight - 1, rect.top + rect.height / 2)) };
+    }, selector);
+    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX, deltaY }, this.sessionId);
+  }
+
+  async domCheck(selector: string, checked: boolean): Promise<void> {
+    const current = await this.evaluate((inputSelector: string) => {
+      const element = document.querySelector(inputSelector);
+      if (!(element instanceof HTMLInputElement) || !/^(checkbox|radio)$/.test(element.type)) {
+        throw new Error(`DOM check target invalid: ${inputSelector}`);
+      }
+      return element.checked;
+    }, selector);
+    if (current !== checked) await this.domClick(selector);
+    const actual = await this.evaluate((inputSelector: string) => (document.querySelector(inputSelector) as HTMLInputElement | null)?.checked, selector);
+    if (actual !== checked) throw new Error(`DOM checked state mismatch: ${selector}`);
+  }
+
+  async domSelect(selector: string, value: string): Promise<void> {
+    const actual = await this.evaluate((input: { selector: string; value: string }) => {
+      const element = document.querySelector(input.selector);
+      if (!(element instanceof HTMLSelectElement)) throw new Error(`DOM select target invalid: ${input.selector}`);
+      element.value = input.value;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return element.value;
+    }, { selector, value });
+    if (actual !== value) throw new Error(`DOM select value mismatch: ${selector}`);
+  }
+
+  async domWait(selector: string, timeoutMs = 30_000): Promise<void> {
+    await this.evaluate(async (input: { selector: string; timeoutMs: number }) => {
+      const started = Date.now();
+      while (!document.querySelector(input.selector)) {
+        if (Date.now() - started >= input.timeoutMs) throw new Error(`DOM wait timeout: ${input.selector}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }, { selector, timeoutMs });
+  }
+}
+
+async function pageTargets(
+  raw: RawCdpConnection,
+): Promise<{ targetId: string; type?: string }[]> {
+  const res = (await raw.send("Target.getTargets")) as {
+    targetInfos?: { targetId: string; type?: string }[];
+  };
+  return (res.targetInfos ?? []).filter((t) => t.type === "page");
+}
+
+/** 关掉一批 page。若会关到 Chrome 只剩这些，先开一扇后台空白窗，避免退出。 */
+export async function closeTargetsKeepChrome(
+  raw: RawCdpConnection,
+  targetIds: Iterable<string>,
+): Promise<void> {
+  const closing = new Set(targetIds);
+  if (closing.size === 0) return;
+  let pages: { targetId: string; type?: string }[] = [];
+  try {
+    pages = await pageTargets(raw);
+  } catch {
+    pages = [];
+  }
+  const leftover = pages.filter((t) => !closing.has(t.targetId));
+  if (leftover.length === 0) {
+    await raw
+      .send("Target.createTarget", {
+        url: "about:blank",
+        newWindow: true,
+        background: true,
+        focus: false,
+      })
+      .catch(() => {});
+  }
+  await Promise.all(
+    [...closing].map((targetId) =>
+      raw.send("Target.closeTarget", { targetId }).catch(() => {}),
+    ),
+  );
+}
+
+export class CdpContext {
+  private raw: RawCdpConnection;
+  private pagesMap = new Map<string, CdpPage>();
+  private sessionToTarget = new Map<string, string>();
+  private runWindowId: number | null = null;
+  private runAnchorId: string | null = null;
+
+  constructor(raw: RawCdpConnection) {
+    this.raw = raw;
+    this.initTargetListeners();
+  }
+
+  private initTargetListeners(): void {
+    this.raw.on("Target.attachedToTarget", (params) => {
+      const e = params as {
+        sessionId: string;
+        targetInfo: { targetId: string; type: string; url?: string };
+      };
+      const chromeUi =
+        e.targetInfo.url?.startsWith("chrome://") ||
+        e.targetInfo.url?.startsWith("devtools://");
+      if (e.targetInfo.type !== "page" || chromeUi) {
+        return;
+      }
+      if (this.pagesMap.has(e.targetInfo.targetId)) {
+        this.sessionToTarget.set(e.sessionId, e.targetInfo.targetId);
+      }
+    });
+
+    this.raw.on("Target.detachedFromTarget", (params) => {
+      const e = params as { sessionId: string; targetId?: string };
+      const targetId = e.targetId || this.sessionToTarget.get(e.sessionId);
+      if (targetId) {
+        this.sessionToTarget.delete(e.sessionId);
+        const page = this.pagesMap.get(targetId);
+        if (page) {
+          page.markClosed();
+          this.pagesMap.delete(targetId);
+        }
+      }
+    });
+
+    this.raw.on("Target.targetDestroyed", (params) => {
+      const e = params as { targetId: string };
+      const page = this.pagesMap.get(e.targetId);
+      if (page) {
+        page.markClosed();
+        this.pagesMap.delete(e.targetId);
+      }
+      if (e.targetId === this.runAnchorId) this.runAnchorId = null;
+    });
+  }
+
+  async init(): Promise<void> {
+    await setPageAutoAttach(this.raw, false);
+  }
+
+  runKeepIds(): Set<string> {
+    return this.runAnchorId ? new Set([this.runAnchorId]) : new Set();
+  }
+
+  async openRunWindow(): Promise<CdpPage> {
+    if (!(await this.runWindowAlive())) {
+      this.forgetRunMeta();
+      return await this.createRunWindow();
+    }
+    return await this.ensureAnchor();
+  }
+
+  async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
+    const page = await this.createPage({
+      url: "about:blank",
+      newWindow: true,
+      background: true,
+      focus: false,
+    });
+    await page.evaluate(`document.title = ${JSON.stringify(RECORD_WINDOW_TITLE)}`);
+    const win = (await this.raw.send("Browser.getWindowForTarget", {
+      targetId: page.targetId,
+    })) as { windowId?: number };
+    if (win?.windowId == null) {
+      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
+      this.forgetPage(page.targetId);
+      throw new Error("record 窗没有 windowId");
+    }
+    return { page, windowId: win.windowId };
+  }
+
+  /** 这一次 run 结束：tab 回到 about:blank，标题改回 `yodo run`。不关窗。 */
+  async endRunTabs(): Promise<void> {
+    if (this.runWindowId == null) return;
+    if (!(await this.runWindowAlive())) {
+      this.forgetRunMeta();
+      return;
+    }
+    const inWin = await this.targetsInRunWindow();
+    for (const id of inWin) {
+      if (id === this.runAnchorId) continue;
+      await this.raw.send("Target.closeTarget", { targetId: id }).catch(() => {});
+      this.forgetPage(id);
+    }
+    try {
+      const page = await this.ensureAnchor();
+      await page.goto("about:blank");
+      await this.setTabTitle(page, RUN_WINDOW_TITLE);
+    } catch {
+      this.forgetRunMeta();
+    }
+  }
+
+  /** holder 停：整扇 run 窗关掉。 */
+  async closeRunWindow(): Promise<void> {
+    const ids = new Set(await this.targetsInRunWindow());
+    if (this.runAnchorId) ids.add(this.runAnchorId);
+    this.forgetRunMeta();
+    await closeTargetsKeepChrome(this.raw, ids);
+    await this.detachAllPages();
+  }
+
+  async detachAllPages(keep: ReadonlySet<string> = new Set()): Promise<void> {
+    const pages = [...this.pagesMap.values()].filter((p) => !keep.has(p.targetId));
+    for (const page of pages) {
+      this.pagesMap.delete(page.targetId);
+      this.sessionToTarget.delete(page.sessionId);
+      page.markClosed();
+    }
+    await Promise.all(
+      pages.map(async (page) => {
+        await this.raw
+          .send("Target.detachFromTarget", { sessionId: page.sessionId }, this.raw.browserSessionId)
+          .catch((err) => {
+            logger.warn("detachFromTarget failed", {
+              err: err instanceof Error ? err.message : String(err),
+            });
+          });
+      }),
+    );
+  }
+
+  private forgetPage(targetId: string): void {
+    const page = this.pagesMap.get(targetId);
+    if (page) {
+      page.markClosed();
+      this.pagesMap.delete(targetId);
+      this.sessionToTarget.delete(page.sessionId);
+    }
+  }
+
+  private forgetRunMeta(): void {
+    this.runWindowId = null;
+    this.runAnchorId = null;
+  }
+
+  private async windowIdOf(targetId: string): Promise<number | undefined> {
+    try {
+      const win = (await this.raw.send("Browser.getWindowForTarget", { targetId })) as {
+        windowId?: number;
+      };
+      return win?.windowId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async targetsInRunWindow(): Promise<string[]> {
+    if (this.runWindowId == null) return [];
+    const ids: string[] = [];
+    try {
+      for (const t of await pageTargets(this.raw)) {
+        if ((await this.windowIdOf(t.targetId)) === this.runWindowId) ids.push(t.targetId);
+      }
+    } catch {
+      return ids;
+    }
+    return ids;
+  }
+
+  private async runWindowAlive(): Promise<boolean> {
+    if (this.runWindowId == null) return false;
+    if (this.runAnchorId != null) {
+      if ((await this.windowIdOf(this.runAnchorId)) === this.runWindowId) return true;
+    }
+    return (await this.targetsInRunWindow()).length > 0;
+  }
+
+  private async setTabTitle(page: CdpPage, title: string): Promise<void> {
+    await page.evaluate(`document.title = ${JSON.stringify(title)}`);
+  }
+
+  private async createRunWindow(): Promise<CdpPage> {
+    const page = await this.createPage({
+      url: "about:blank",
+      newWindow: true,
+      background: true,
+      focus: false,
+    });
+    const windowId = await this.windowIdOf(page.targetId);
+    if (windowId == null) {
+      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
+      this.forgetPage(page.targetId);
+      throw new Error("run 窗没有 windowId");
+    }
+    this.runWindowId = windowId;
+    this.runAnchorId = page.targetId;
+    await this.setTabTitle(page, RUN_WINDOW_TITLE);
+    return page;
+  }
+
+  private async ensureAnchor(): Promise<CdpPage> {
+    if (this.runWindowId == null) return await this.createRunWindow();
+    if (this.runAnchorId) {
+      const existing = this.pagesMap.get(this.runAnchorId);
+      if (existing && !existing.isClosed()) {
+        if ((await this.windowIdOf(existing.targetId)) === this.runWindowId) {
+          await this.setTabTitle(existing, RUN_WINDOW_TITLE).catch(() => {});
+          return existing;
+        }
+      }
+    }
+    if (this.runAnchorId) {
+      const w = await this.windowIdOf(this.runAnchorId);
+      if (w === this.runWindowId) {
+        const page = await this.attachTarget(this.runAnchorId);
+        await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
+        return page;
+      }
+    }
+    const inWin = await this.targetsInRunWindow();
+    const reuse = inWin[0];
+    if (reuse) {
+      const page = await this.attachTarget(reuse);
+      this.runAnchorId = page.targetId;
+      await page.goto("about:blank").catch(() => {});
+      await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
+      return page;
+    }
+    this.forgetRunMeta();
+    return await this.createRunWindow();
+  }
+
+  private async attachTarget(targetId: string, url = "about:blank"): Promise<CdpPage> {
+    const existing = this.pagesMap.get(targetId);
+    if (existing && !existing.isClosed()) return existing;
+    const attachRes = (await this.raw.send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    })) as { sessionId: string };
+    const page = new CdpPage(this.raw, targetId, attachRes.sessionId, url);
+    this.sessionToTarget.set(attachRes.sessionId, targetId);
+    this.pagesMap.set(targetId, page);
+    await page.initPage();
+    return page;
+  }
+
+  private async createPage(params: Record<string, unknown>): Promise<CdpPage> {
+    const createRes = (await this.raw.send("Target.createTarget", params)) as {
+      targetId: string;
+    };
+    return this.attachTarget(createRes.targetId);
+  }
+
+  pages(): CdpPage[] {
+    return Array.from(this.pagesMap.values()).filter((p) => !p.isClosed());
+  }
+
+  getPage(targetId: string): CdpPage | undefined {
+    return this.pagesMap.get(targetId);
+  }
+
+  async newPage(): Promise<CdpPage> {
+    const page = await this.openRunWindow();
+    await page.goto("about:blank");
+    return page;
+  }
+}
+
+export class CdpBrowser {
+  readonly raw: RawCdpConnection;
+  private contextInstance: CdpContext;
+  private disconnectListeners: Set<() => void> = new Set();
+
+  constructor(raw: RawCdpConnection, context: CdpContext) {
+    this.raw = raw;
+    this.contextInstance = context;
+
+    raw.onClose(() => {
+      for (const listener of this.disconnectListeners) {
+        try {
+          listener();
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+  }
+
+  contexts(): CdpContext[] {
+    return [this.contextInstance];
+  }
+
+  async version(): Promise<string> {
+    try {
+      const ver = (await this.raw.send("Browser.getVersion")) as { product?: string };
+      return ver?.product || "Google Chrome (CDP)";
+    } catch {
+      return "Google Chrome (CDP)";
+    }
+  }
+
+  isConnected(): boolean {
+    return !this.raw.isClosed();
+  }
+
+  on(event: "disconnected", listener: () => void): void {
+    if (event === "disconnected") {
+      this.disconnectListeners.add(listener);
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.raw.close();
+  }
+}
+
+export async function connectChrome(): Promise<{
+  browser: CdpBrowser;
+  context: CdpContext;
+}> {
+  const ws = await resolveWsEndpoint();
+  const raw = await getSharedRawCdp(ws);
+
+  const context = new CdpContext(raw);
+  await context.init();
+
+  const browser = new CdpBrowser(raw, context);
+
+  try {
+    await timeoutReject(raw.send("Target.getTargets"), CDP_SHORT_TIMEOUT_MS, "attach");
+  } catch (e) {
+    await disconnectChrome(browser);
+    throw e;
+  }
+
+  logger.info("Chrome connected");
+  return { browser, context };
+}
+
+export async function disconnectChrome(browser: CdpBrowser): Promise<void> {
+  await closeSharedRawCdp().catch(() => {});
+  await browser.close().catch(() => {});
+  logger.info("Chrome disconnected");
+}

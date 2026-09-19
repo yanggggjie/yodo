@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="268" viewBox="0 0 720 268" role="img" aria-label="花费（本次）">
+  <defs>
+    <pattern id="learn" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <rect width="8" height="8" fill="#c5c9d0"/>
+      <path d="M0 0h3v8H0z" fill="#dfe2e6"/>
+    </pattern>
+  </defs>
+  <rect width="720" height="268" rx="12" fill="#f4f5f7"/>
+  <g font-family='ui-sans-serif, system-ui, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif'>
+    <text x="20" y="32" font-size="16" font-weight="600" fill="#111">花费（本次）</text>
+    <rect x="168" y="52" width="135.2" height="40" rx="6" fill="#1f6b4a"/><text x="20" y="78" font-size="15" fill="#222">yodo (run)</text><text x="313.2" y="78" text-anchor="start" font-size="15" fill="#222">$0.24</text><rect x="168" y="106" width="467.7" height="40" rx="6" fill="#8b9099"/><text x="20" y="132" font-size="15" fill="#222">agent-browser</text><text x="623.7" y="132" text-anchor="end" font-size="15" fill="#222">$0.83</text><rect x="168" y="160" width="524.0" height="40" rx="6" fill="#8b9099"/><text x="20" y="186" font-size="15" fill="#222">browser-use</text><text x="680.0" y="186" text-anchor="end" font-size="15" fill="#222">$0.93</text><rect x="168" y="214" width="467.7" height="40" rx="6" fill="url(#learn)"/><text x="20" y="240" font-size="15" fill="#222">yodo (learn)</text><text x="623.7" y="240" text-anchor="end" font-size="15" fill="#222">$0.83</text>
+  </g>
+</svg>
