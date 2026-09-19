@@ -36,7 +36,11 @@ const install = spawnSync("npm", ["install", "--omit=dev", "--omit=optional"], {
   cwd: DEST,
   stdio: "inherit",
   env: process.env,
+  shell: process.platform === "win32",
 });
+if (install.error) {
+  console.error(`无法启动 npm：${install.error.message}`);
+}
 if (install.status !== 0) {
   console.error("npm install 失败");
   process.exit(install.status ?? 1);
