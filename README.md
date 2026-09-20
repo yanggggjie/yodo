@@ -29,6 +29,9 @@ yodo 使用你本机已登录账号的 Google Chrome 完成任务；
 - **`yodo (run)`**：运行已有脚本。
 - **`yodo (learn)`**：用户演示后，学习并完成任务。
 
+> [!NOTE]
+> 清空上下文后，`agent-browser` 和 `browser-use` 执行速度基本不变；`yodo (run)` 可复用已有脚本，通常比首次学习更快。
+
 每种方式只测试一次，结果不是多次平均。详细数据见 [Benchmark 说明](#6-benchmark-说明)。
 
 ### 1.2 性能分析
@@ -53,6 +56,9 @@ shell 次数表示 Claude Code 发起了多少次工具调用。思考时间是 
 
 直接执行 3 个已有脚本，分别读取 X、发布知乎和发布即刻，共执行 **3 次 shell**。
 
+> [!NOTE]
+> `yodo (learn)` 只需执行一次。学会读取 X Following、发布知乎想法和发布即刻帖子后，`yodo (run)` 可在后续任务中直接复用。
+
 ## 2. 安装与更新
 
 ### 2.1 交给 agent 执行
@@ -67,8 +73,9 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 公开安装跟随 GitHub 默认分支 `main`。
 
 > [!IMPORTANT]
-> - yodo 被禁止自行探索网站。对于新的网站，始终需要你演示一次。
-> - yodo 使用你的账号访问网站。抖音、小红书、淘宝、美团、携程等大型互联网网站有完善的风控机制；yodo fallback 到使用 click、fill 等动作完成任务，运行可能较慢。同时请勿批量使用，以免影响网站正常运行或导致账号受损。
+> - 新网站需先演示一次，yodo 不会自行探索。
+> - **yodo 更适合普通网站**。抖音、小红书等风控网站会 fallback 到 DOM 操作运行较慢；
+> - 请勿批量使用，以免影响网站运行或账号安全。
 
 ## 3. 使用
 
@@ -105,6 +112,10 @@ TypeError: Cannot read properties of undefined (reading 'id')
 
 > [!IMPORTANT]
 > 规则只有一条：输入中带上 `yodo` 这个触发词。
+
+**演示视频**
+
+[演示视频](https://www.youtube.com/watch?v=KfW4o9qQoE0)
 
 ## 4. 工作方式
 
