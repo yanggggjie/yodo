@@ -9,11 +9,9 @@ yodo 使用你本机已登录账号的 Google Chrome 完成任务；
 
 新任务只需演示一次，学会后可直接运行脚本，**完成任务更快、token 消耗更少**。
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
-    <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="720">
-  </a>
-</p>
+<a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
+  <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="360">
+</a>
 
 ## 1. 性能
 
@@ -121,11 +119,9 @@ TypeError: Cannot read properties of undefined (reading 'id')
 
 ### 3.5 演示视频
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
-    <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="640">
-  </a>
-</p>
+<a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
+  <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="320">
+</a>
 
 ## 4. 工作方式
 
