@@ -47,14 +47,15 @@ try {
   for (const rel of [
     "SKILL.md",
     "LICENSE",
+    "update.md",
     "setup.js",
     "src/sdk.ts",
     "src/holder.ts",
     "src/bin/start.js",
     "src/bin/record-start.js",
     "src/store/deploy.ts",
-    "src/templates/task-common/yodo.js",
-    "src/templates/task-common/url.js",
+    "src/templates/task-lib/index.js",
+    "src/templates/task-lib/url.js",
     "src/package.json",
     "src/package-lock.json",
   ]) {

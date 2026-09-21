@@ -46,11 +46,11 @@ export function formatStack(err: unknown, scriptAbs: string): string[] {
   const raw = err.stack ?? "";
   const dir = path.dirname(scriptAbs);
   const dirUrl = pathToFileURL(dir).href;
-  const commons = [
-    path.join(dir, "_common"),
-    path.resolve(dir, "..", "task", "_common"),
+  const libraries = [
+    path.join(dir, "lib"),
+    path.resolve(dir, "..", "task", "lib"),
   ];
-  const needles = [dir, dirUrl, ...commons.flatMap((p) => [p, pathToFileURL(p).href])];
+  const needles = [dir, dirUrl, ...libraries.flatMap((p) => [p, pathToFileURL(p).href])];
   const all = raw
     .split("\n")
     .slice(1)

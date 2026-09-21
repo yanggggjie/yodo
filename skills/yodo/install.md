@@ -2,6 +2,8 @@
 
 安装和更新使用同一套流程：同步 GitHub 默认分支 `main` 上的 yodo skill，检查本机环境，运行 `setup.js`，最后验收 `~/.yodo`。
 
+更新现有安装前先阅读 [更新说明](./update.md)，尤其是 `~/.yodo/task/*.js` 的迁移要求。
+
 ```mermaid
 flowchart TD
   A[同步 yodo skill] --> B{环境是否满足要求}
@@ -78,7 +80,7 @@ node setup.js
 2. 停止旧 holder，并清理 stale socket 和 pid。
 3. 用当前 skill 的 `src/` 替换 `~/.yodo/src`，不复制源目录中的 `node_modules`。
 4. 在 `~/.yodo/src` 运行 `npm install --omit=dev --omit=optional`。
-5. 调用 `~/.yodo/src/bin/init.js`，创建数据目录并同步 `task/_common/`。
+5. 调用 `~/.yodo/src/bin/init.js`，创建数据目录并同步 `task/lib/`。
 
 setup 不会在 `~/.yodo/src` 中写 `task`，也不会在完成后重新启动 holder。
 
@@ -87,10 +89,10 @@ setup 不会在 `~/.yodo/src` 中写 `task`，也不会在完成后重新启动 
 | 路径 | setup 的处理 |
 |---|---|
 | `~/.yodo/src` | 清空后部署当前版本的运行时，并重新安装依赖 |
-| `~/.yodo/task` | 保留 `capability`；刷新 `_common/` 和 package 元数据 |
-| `~/.yodo/temp` | 保留 `candidate` |
-| `~/.yodo/record` | 保留已有 `record` |
-| `~/.yodo/session` | 停止旧 holder，并清理失效的连接状态 |
+| `~/.yodo/task` | 保留 capability；更新前按 `update.md` 迁移 task，刷新 `lib/` 和 package 元数据 |
+| `~/.yodo/temp` | 不保证兼容，不纳入更新迁移 |
+| `~/.yodo/record` | 原样保留，不修改已有 record |
+| `~/.yodo/session` | 停止旧 holder并按新版本重建运行状态 |
 
 ### 3.3 处理部署错误
 
@@ -109,11 +111,11 @@ setup 不会在 `~/.yodo/src` 中写 `task`，也不会在完成后重新启动 
 | 路径 | 应有内容 |
 |---|---|
 | `~/.yodo/src` | 当前运行时源码、`package-lock.json` 和本地依赖 |
-| `~/.yodo/task` | `capability`、`package.json` 和 `_common/` |
+| `~/.yodo/task` | `capability`、`package.json` 和 `lib/` |
 | `~/.yodo/temp` | `candidate` 和 `package.json` |
 | `~/.yodo/record` | `record` 和内部 `.active/` |
 | `~/.yodo/session` | holder 的 pid、连接状态和 `log.jsonl` |
-| `~/.yodo/task/_common/yodo.js` | `task` 使用的 SDK 与 URL helper 入口 |
+| `~/.yodo/task/lib/index.js` | `task` 使用的 SDK 与 helper 入口 |
 | `~/.yodo/src/node_modules/tldts/dist/cjs/index.js` | 运行时依赖 marker |
 
 ### 4.2 补齐缺失内容
@@ -124,7 +126,7 @@ setup 不会在 `~/.yodo/src` 中写 `task`，也不会在完成后重新启动 
 node setup.js
 ```
 
-如果 `~/.yodo/src` 和依赖已经正确，仅缺数据目录或 `_common/`，可以运行：
+如果 `~/.yodo/src` 和依赖已经正确，仅缺数据目录或 `lib/`，可以运行：
 
 ```bash
 node ~/.yodo/src/bin/init.js
@@ -139,8 +141,9 @@ node ~/.yodo/src/bin/init.js
 - [ ] Node major ≥24。
 - [ ] `~/.yodo/src` 来自本次安装的 skill，且依赖 marker 存在。
 - [ ] `~/.yodo/src`、`~/.yodo/task`、`~/.yodo/temp`、`~/.yodo/record`、`~/.yodo/session` 全部存在。
-- [ ] `~/.yodo/task/_common/yodo.js` 存在。
-- [ ] 更新没有删除 `capability`、`candidate` 或 `record`。
+- [ ] `~/.yodo/task/lib/index.js` 存在。
+- [ ] 已按 `update.md` 检查并迁移现有 `~/.yodo/task/*.js`。
+- [ ] 更新没有修改或删除已有 `record`。
 
 ## 5. 诊断异常
 

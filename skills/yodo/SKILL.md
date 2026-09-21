@@ -242,15 +242,14 @@ stop 返回的 `name` 是本次最终 `record` name，且必须等于 `recordDir
  * @record search-a7f3c1
  * @param argv[2] 搜索词
  */
-import { yodo, serializeUrl } from "../task/_common/yodo.js";
+import { yodo, serializeUrl, goto, evaluate } from "../task/lib/index.js";
 
 const ORIGIN = "https://example.com";
 const query = process.argv[2] ?? "";
 
-await yodo.run(async ({ browserContext }) => {
-  const page = await browserContext.newPage();
-  await page.goto(serializeUrl({ bareUrl: `${ORIGIN}/search`, query: { q: query } }));
-  return page.evaluate(async (q) => {
+await yodo.run(async ({ page }) => {
+  await goto(page, serializeUrl({ bareUrl: `${ORIGIN}/search`, query: { q: query } }));
+  return evaluate(page, async (q) => {
     const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
@@ -304,35 +303,34 @@ recordDir/DOM/DOMTimeline.jsonl
  * @record search-a7f3c1
  * @param argv[2] 搜索词
  */
-import { yodo } from "../task/_common/yodo.js";
+import { yodo, goto, evaluate, fill, press, waitForSelector } from "../task/lib/index.js";
 
 const query = process.argv[2] ?? "";
 
-await yodo.run(async ({ browserContext }) => {
-  const page = await browserContext.newPage();
-  await page.goto("https://example.com/search");
-  await page.dom.wait('input[name="q"]');
-  await page.dom.fill('input[name="q"]', query);
-  await page.dom.press('input[name="q"]', "Enter");
-  await page.dom.wait(".result-list");
-  const result = await page.evaluate(() => ({ count: document.querySelectorAll(".result-item").length }));
+await yodo.run(async ({ page }) => {
+  await goto(page, "https://example.com/search");
+  await waitForSelector(page, 'input[name="q"]');
+  await fill(page, 'input[name="q"]', query);
+  await press(page, 'input[name="q"]', "Enter");
+  await waitForSelector(page, ".result-list");
+  const result = await evaluate(page, () => ({ count: document.querySelectorAll(".result-item").length }));
   if (result.count === 0) throw new Error("没有查询到搜索结果");
   return result;
 });
 ```
 
-可用 API：
+优先使用 `lib` 中已有的通用操作：
 
-- `page.dom.wait(selector, { timeout? })`
-- `page.dom.fill(selector, value)`
-- `page.dom.press(selector, key)`
-- `page.dom.click(selector)`
-- `page.dom.scroll(selector?, { deltaX?, deltaY? })`
-- `page.dom.check(selector, checked)`
-- `page.dom.select(selector, value)`
-- `page.evaluate()` 读取当前页面 DOM、判断状态或完成其它必要操作
+- `waitForSelector(page, selector, { state?, timeout? })`
+- `fill(page, selector, value)`
+- `press(page, selector, key)`
+- `click(page, selector)`
+- `scroll(page, selector?, { deltaX?, deltaY? })`
+- `check(page, selector, checked)`
+- `select(page, selector, value)`
+- `evaluate(page, fn, ...args)` 读取当前页面 DOM、判断状态或完成其它必要操作
 
-DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 用于定位、读取状态、计算坐标和验证结果。普通 command、`page.goto` 与 `page.dom.wait` 默认 timeout 为 30s。
+DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 用于定位、读取状态、计算坐标和验证结果。`goto` 与 `waitForSelector` 默认 timeout 为 30s。
 
 ### 8.3 运行和验证 DOM `candidate`
 
@@ -360,12 +358,16 @@ DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 
 
 ### 9.1 使用 SDK
 
-- 从 `../task/_common/yodo.js` 导入 `yodo`、`serializeUrl`、`parseUrl`。
+- 从 `../task/lib/index.js` 导入 `yodo` 和需要的 helper。
 - 每次变化或跨 `task` 传递的值必须走 `process.argv`。
-- `browserContext.newPage()` 只返回 `yodo run` 窗口中的唯一 tab，不连接用户已有 tab。
-- `page.goto(url, { timeout }?)` 不支持 `waitUntil`。
-- `page.evaluate(fn, ...args)` 的参数必须可 JSON 序列化，函数不能依赖外层闭包。
-- `page.url()` 是同步方法；另有 `page.title()`、`page.close()`、`page.bringToFront()`。
+- `yodo.run(async ({ page }) => ...)` 直接提供当前 task 独占的运行页面，不连接用户已有 tab。
+- `yodo` 对 task 只公开 `run()`；参数在调用前从 `process.argv` 读取。
+- 已有 `lib` helper 能完整表达操作时必须使用 helper；没有 helper 的单个 CDP command/event 可以使用 `page.cdp.send/on/once`。
+- 只有 page scope 无法完成必要观察或操作时，才使用 callback 中带下划线的 `_cdp.connection` 或 `_cdp.browser`。不得关闭用户 target/browser、detach holder session、修改 holder 全局 attach/discover 状态或留下跨 task 状态。
+- `page._targetId` 只用于 `_cdp` 排障与 target 关联；不公开 CDP session ID。
+- `goto(page, url, { timeout }?)` 不支持 `waitUntil`。
+- `evaluate(page, fn, ...args)` 的参数必须可 JSON 序列化，函数不能依赖外层闭包。
+- 一次只运行一个 task；确需把多个操作作为一个批次完成时，编写一个新的 task，在同一次 `yodo.run()` 中顺序执行。
 - return 只放 `result`，不放核对 URL。
 - 使用 `network implementation` 的 `task` 不操作 DOM；使用 `DOM implementation` 的 `task` 可以操作 DOM，但不得混入其它 `task`。
 

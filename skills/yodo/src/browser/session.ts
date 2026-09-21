@@ -36,6 +36,7 @@ export type RawCdpConnection = {
     method: string,
     params?: Record<string, unknown>,
     sessionId?: string,
+    timeoutMs?: number,
   ) => Promise<unknown>;
   on: (
     method: string,
@@ -545,104 +546,6 @@ export class CdpPage {
     return response?.result?.value as T;
   }
 
-  async domClick(selector: string): Promise<void> {
-    const point = await this.evaluate((value: string) => {
-      const element = document.querySelector(value);
-      if (!(element instanceof HTMLElement)) throw new Error(`DOM target not found: ${value}`);
-      element.scrollIntoView({ block: "center", inline: "center" });
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) throw new Error(`DOM target not visible: ${value}`);
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const hit = document.elementFromPoint(x, y);
-      if (!hit || (hit !== element && !element.contains(hit))) throw new Error(`DOM target obscured: ${value}`);
-      return { x, y };
-    }, selector);
-    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y }, this.sessionId);
-    await this.raw.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1 }, this.sessionId);
-    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", buttons: 0, clickCount: 1 }, this.sessionId);
-  }
-
-  async domFill(selector: string, value: string): Promise<void> {
-    await this.domClick(selector);
-    const modifier = process.platform === "darwin" ? 4 : 2;
-    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: modifier }, this.sessionId);
-    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: modifier }, this.sessionId);
-    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 }, this.sessionId);
-    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 }, this.sessionId);
-    await this.raw.send("Input.insertText", { text: value }, this.sessionId);
-    const actual = await this.evaluate((inputSelector: string) => {
-      const element = document.querySelector(inputSelector);
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value;
-      if (element instanceof HTMLElement && element.isContentEditable) return element.innerText;
-      throw new Error(`DOM fill target not editable: ${inputSelector}`);
-    }, selector);
-    if (actual !== value) throw new Error(`DOM fill value mismatch: ${selector}`);
-  }
-
-  async domPress(selector: string, key: string): Promise<void> {
-    await this.evaluate((inputSelector: string) => {
-      const element = document.querySelector(inputSelector);
-      if (!(element instanceof HTMLElement)) throw new Error(`DOM target not found: ${inputSelector}`);
-      element.focus();
-    }, selector);
-    const keys: Record<string, { code: string; vk: number }> = {
-      Enter: { code: "Enter", vk: 13 }, Escape: { code: "Escape", vk: 27 }, Tab: { code: "Tab", vk: 9 },
-      ArrowUp: { code: "ArrowUp", vk: 38 }, ArrowDown: { code: "ArrowDown", vk: 40 },
-      ArrowLeft: { code: "ArrowLeft", vk: 37 }, ArrowRight: { code: "ArrowRight", vk: 39 },
-      " ": { code: "Space", vk: 32 },
-    };
-    const info = keys[key];
-    if (!info) throw new Error(`Unsupported DOM key: ${key}`);
-    await this.raw.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code: info.code, windowsVirtualKeyCode: info.vk }, this.sessionId);
-    await this.raw.send("Input.dispatchKeyEvent", { type: "keyUp", key, code: info.code, windowsVirtualKeyCode: info.vk }, this.sessionId);
-  }
-
-  async domScroll(selector: string | undefined, deltaX: number, deltaY: number): Promise<void> {
-    const point = await this.evaluate((inputSelector?: string) => {
-      const element = inputSelector ? document.querySelector(inputSelector) : document.documentElement;
-      if (!(element instanceof Element)) throw new Error(`DOM scroll target not found: ${inputSelector}`);
-      if (inputSelector) element.scrollIntoView({ block: "center", inline: "center" });
-      const rect = element.getBoundingClientRect();
-      return { x: Math.max(1, Math.min(innerWidth - 1, rect.left + rect.width / 2)), y: Math.max(1, Math.min(innerHeight - 1, rect.top + rect.height / 2)) };
-    }, selector);
-    await this.raw.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX, deltaY }, this.sessionId);
-  }
-
-  async domCheck(selector: string, checked: boolean): Promise<void> {
-    const current = await this.evaluate((inputSelector: string) => {
-      const element = document.querySelector(inputSelector);
-      if (!(element instanceof HTMLInputElement) || !/^(checkbox|radio)$/.test(element.type)) {
-        throw new Error(`DOM check target invalid: ${inputSelector}`);
-      }
-      return element.checked;
-    }, selector);
-    if (current !== checked) await this.domClick(selector);
-    const actual = await this.evaluate((inputSelector: string) => (document.querySelector(inputSelector) as HTMLInputElement | null)?.checked, selector);
-    if (actual !== checked) throw new Error(`DOM checked state mismatch: ${selector}`);
-  }
-
-  async domSelect(selector: string, value: string): Promise<void> {
-    const actual = await this.evaluate((input: { selector: string; value: string }) => {
-      const element = document.querySelector(input.selector);
-      if (!(element instanceof HTMLSelectElement)) throw new Error(`DOM select target invalid: ${input.selector}`);
-      element.value = input.value;
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-      return element.value;
-    }, { selector, value });
-    if (actual !== value) throw new Error(`DOM select value mismatch: ${selector}`);
-  }
-
-  async domWait(selector: string, timeoutMs = 30_000): Promise<void> {
-    await this.evaluate(async (input: { selector: string; timeoutMs: number }) => {
-      const started = Date.now();
-      while (!document.querySelector(input.selector)) {
-        if (Date.now() - started >= input.timeoutMs) throw new Error(`DOM wait timeout: ${input.selector}`);
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    }, { selector, timeoutMs });
-  }
 }
 
 async function pageTargets(

@@ -1,43 +1,28 @@
-/**
- * Detached session holder：进程内只持有 CDP 连接一次，听 unix socket / named pipe。
- * 先 listen，再连 Chrome（连接一直保持 = 续着 Chrome 远程调试授权）。
- * 对外暴露「高层 op」：run.begin/end、page.*、context.new-page、record.*、ping。
- * task 在 client 进程里跑；holder 只在自己那条连接上执行 CDP 并回传结果。
- */
 import * as fs from "node:fs";
 import * as net from "node:net";
-import {
-  connectChrome,
-  disconnectChrome,
-  setDiscoverTargets,
-  setIgnoreCertificateErrors,
-  setPageAutoAttach,
-  type CdpBrowser,
-  type CdpContext,
-  type CdpPage,
-} from "./browser/index.ts";
+import { connectChrome, disconnectChrome, setDiscoverTargets, setIgnoreCertificateErrors, setPageAutoAttach, type CdpBrowser, type CdpContext, type CdpPage } from "./browser/index.ts";
 import { finishRecord, liveRecordName, startRecord } from "./record/index.ts";
 import { sweepDeadActive } from "./store/repository.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
-import {
-  HANDSHAKE_GUIDES,
-  HANDSHAKE_MARKS,
-  handshakeStatusFromError,
-  type SessionRequest,
-  type SessionResponse,
-} from "./protocol.ts";
-import {
-  CDP_COMMAND_TIMEOUT_MS,
-  CDP_SHORT_TIMEOUT_MS,
-  SESSION_DIR,
-  SESSION_LOG,
-  SESSION_PID_FILE,
-  SESSION_SOCK,
-  SESSION_SOCK_IS_FILE,
-} from "./utils/constants.ts";
+import { HANDSHAKE_GUIDES, HANDSHAKE_MARKS, RPC_ERRORS, handshakeStatusFromError, type CdpScope, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, SESSION_DIR, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
 import { createLogger, setLogFile } from "./utils/logger.ts";
 
 const logger = createLogger("holder");
+const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+const MAX_QUEUE_BYTES = 16 * 1024 * 1024;
+const FORBIDDEN_ADVANCED = new Set([
+  "Browser.close",
+  "Browser.setDownloadBehavior",
+  "Security.setIgnoreCertificateErrors",
+  "Target.closeTarget",
+  "Target.createBrowserContext",
+  "Target.createTarget",
+  "Target.detachFromTarget",
+  "Target.disposeBrowserContext",
+  "Target.setAutoAttach",
+  "Target.setDiscoverTargets",
+]);
 
 let browser: CdpBrowser | undefined;
 let context: CdpContext | undefined;
@@ -47,339 +32,116 @@ let recordBusy = false;
 let shuttingDown = false;
 let server: net.Server | undefined;
 
-/** 每条连接的状态；run 绑在发起它的那条连接上。 */
-type ConnState = { runActive: boolean };
-/** 当前持有 run 的连接（同时只允许一个 run）。 */
+type Subscription = { scope: CdpScope; event: string; off: () => void };
+type ConnState = { runActive: boolean; subscriptions: Map<string, Subscription>; write: (message: JsonRpcResponse | JsonRpcNotification, priority?: boolean) => void };
 let activeRunConn: ConnState | null = null;
 
-function pagesOf(ctx: CdpContext): number {
-  let n = 0;
-  for (const p of ctx.pages()) if (!p.isClosed()) n++;
-  return n;
-}
-
-function pingBody(): Pick<SessionResponse, "pid" | "chrome" | "pages" | "record"> {
-  return {
-    pid: process.pid,
-    chrome: chromeVersion || "",
-    pages: context ? pagesOf(context) : 0,
-    record: liveRecordName(),
-  };
-}
-
-function warnCatch(label: string): (err: unknown) => void {
-  return (err) => {
-    logger.warn(label, { err: err instanceof Error ? err.message : String(err) });
-  };
-}
-
-async function tryConnectChrome(): Promise<void> {
-  const connected = await connectChrome();
-  browser = connected.browser;
-  context = connected.context;
-  chromeVersion = await browser.version().catch(() => "Google Chrome (CDP)");
-  logger.info(`Chrome connected: version=${chromeVersion}`);
-  browser.on("disconnected", () => void shutdown(1));
-}
-
-async function ensureChrome(req: SessionRequest): Promise<SessionResponse | null> {
-  if (!chromeReady) chromeReady = tryConnectChrome();
-  await chromeReady;
-  if (!browser || !context) {
-    return { id: req.id, ok: false, error: "holder 尚未连上 Chrome" };
-  }
-  return null;
-}
+function pagesOf(ctx: CdpContext): number { return ctx.pages().filter((page) => !page.isClosed()).length; }
+function pingBody() { return { pid: process.pid, chrome: chromeVersion, pages: context ? pagesOf(context) : 0, record: liveRecordName() }; }
+function warnCatch(label: string): (error: unknown) => void { return (error) => logger.warn(label, { err: error instanceof Error ? error.message : String(error) }); }
+async function tryConnectChrome(): Promise<void> { const connected = await connectChrome(); browser = connected.browser; context = connected.context; chromeVersion = await browser.version().catch(() => "Google Chrome (CDP)"); browser.on("disconnected", () => void shutdown(1)); }
+async function ensureChrome(): Promise<void> { if (!chromeReady) chromeReady = tryConnectChrome(); await chromeReady; if (!browser || !context) throw new Error("holder 尚未连上 Chrome"); }
 
 async function settleIdle(): Promise<void> {
-  if (!browser || !context) return;
-  if (liveRecordName()) return;
-  const prev = browser.raw.commandTimeoutMs;
-  browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
-  try {
-    await context.detachAllPages(context.runKeepIds()).catch(warnCatch("detachAllPages"));
-    await setPageAutoAttach(browser.raw, false);
-    await setDiscoverTargets(browser.raw, false);
-    await setIgnoreCertificateErrors(browser.raw, false);
-  } finally {
-    browser.raw.commandTimeoutMs = prev;
-  }
+  if (!browser || !context || liveRecordName()) return;
+  const previous = browser.raw.commandTimeoutMs; browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
+  try { await context.detachAllPages(context.runKeepIds()).catch(warnCatch("detachAllPages")); await setPageAutoAttach(browser.raw, false); await setDiscoverTargets(browser.raw, false); await setIgnoreCertificateErrors(browser.raw, false); }
+  finally { browser.raw.commandTimeoutMs = previous; }
 }
 
-/** 结束当前 run：tab 回到 about:blank，窗留下。socket 断开中途崩溃也走这里。 */
-async function runEnd(): Promise<void> {
-  if (!activeRunConn) return;
-  const conn = activeRunConn;
-  activeRunConn = null;
+function clearSubscriptions(conn: ConnState): void { for (const subscription of conn.subscriptions.values()) subscription.off(); conn.subscriptions.clear(); }
+async function runEnd(conn = activeRunConn): Promise<void> {
+  if (!conn || activeRunConn !== conn) return;
+  clearSubscriptions(conn);
+  if (activeRunConn === conn) activeRunConn = null;
   conn.runActive = false;
   if (browser) browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
   await context?.endRunTabs().catch(warnCatch("endRunTabs"));
   await settleIdle().catch(warnCatch("run end settle"));
 }
 
-function pageById(id: string | undefined): CdpPage {
-  if (!id) throw new Error("缺少 pageId");
-  const p = context?.getPage(id);
-  if (!p) throw new Error(`page 不存在或已关闭：${id}`);
-  return p;
-}
+function pageById(id: unknown): CdpPage { if (typeof id !== "string") throw Object.assign(new Error("缺少 pageId"), { code: RPC_ERRORS.INVALID_PARAMS }); const page = context?.getPage(id); if (!page) throw Object.assign(new Error(`page 不存在或已关闭：${id}`), { code: RPC_ERRORS.PAGE_NOT_FOUND }); return page; }
+function paramsOf(req: JsonRpcRequest): Record<string, unknown> { return req.params ?? {}; }
+function scopeOf(value: unknown): CdpScope { if (!value || typeof value !== "object") throw Object.assign(new Error("无效 CDP scope"), { code: RPC_ERRORS.INVALID_PARAMS }); const scope = value as CdpScope; if (scope.type === "connection" || scope.type === "browser") return scope; if (scope.type === "page" && typeof scope.pageId === "string") return scope; throw Object.assign(new Error("无效 CDP scope"), { code: RPC_ERRORS.INVALID_PARAMS }); }
+function sessionIdOf(scope: CdpScope): string | undefined { if (scope.type === "connection") return undefined; if (scope.type === "browser") return browser!.raw.browserSessionId; return pageById(scope.pageId).sessionId; }
+function sameScope(scope: CdpScope, sessionId?: string): boolean { return sessionIdOf(scope) === sessionId; }
+function assertCdpAllowed(method: string): void { if (FORBIDDEN_ADVANCED.has(method)) throw Object.assign(new Error(`禁止 task 调用 ${method}`), { code: RPC_ERRORS.FORBIDDEN_CDP }); }
 
-async function handleOp(req: SessionRequest, conn: ConnState): Promise<SessionResponse> {
-  const id = req.id;
-
-  if (req.op === "ping") {
-    if (chromeReady) await chromeReady;
-    return { id, ok: true, ...pingBody() };
-  }
-
-  const blocked = await ensureChrome(req);
-  if (blocked) return blocked;
-  browser!.raw.rpc = { id, op: req.op };
-
+async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> {
+  if (req.method === "ping") { if (chromeReady) await chromeReady; return pingBody(); }
+  await ensureChrome();
+  browser!.raw.rpc = { id: req.id, op: req.method };
   try {
-    switch (req.op) {
+    const params = paramsOf(req);
+    switch (req.method) {
       case "run.begin": {
-        if (activeRunConn) return { id, ok: false, error: "run 进行中" };
-        const rec = liveRecordName();
-        if (rec) {
-          return { id, ok: false, error: `record ${rec} 仍在进行；请先 record stop/abort` };
-        }
-        if (recordBusy) return { id, ok: false, error: "record 操作进行中" };
-        browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
-        await setIgnoreCertificateErrors(browser!.raw, true);
-        await context!.openRunWindow();
-        activeRunConn = conn;
-        conn.runActive = true;
-        return { id, ok: true };
-      }
-      case "run.end": {
-        await runEnd();
-        return { id, ok: true };
-      }
-      case "context.new-page": {
-        const p = await context!.newPage();
-        return { id, ok: true, pageId: p.targetId, url: p.url() };
-      }
-      case "page.goto": {
-        await pageById(req.pageId).goto(
-          req.url ?? "",
-          req.timeoutMs ? { timeout: req.timeoutMs } : undefined,
-        );
-        return { id, ok: true };
-      }
-      case "page.evaluate": {
-        const value = await pageById(req.pageId).evaluate(req.expr ?? "undefined");
-        return { id, ok: true, value };
-      }
-      case "page.dom-click":
-        await pageById(req.pageId).domClick(req.selector ?? "");
-        return { id, ok: true };
-      case "page.dom-fill":
-        await pageById(req.pageId).domFill(req.selector ?? "", req.value ?? "");
-        return { id, ok: true };
-      case "page.dom-press":
-        await pageById(req.pageId).domPress(req.selector ?? "", req.key ?? "");
-        return { id, ok: true };
-      case "page.dom-scroll":
-        await pageById(req.pageId).domScroll(req.selector, req.deltaX ?? 0, req.deltaY ?? 0);
-        return { id, ok: true };
-      case "page.dom-check":
-        await pageById(req.pageId).domCheck(req.selector ?? "", req.checked === true);
-        return { id, ok: true };
-      case "page.dom-select":
-        await pageById(req.pageId).domSelect(req.selector ?? "", req.value ?? "");
-        return { id, ok: true };
-      case "page.dom-wait":
-        await pageById(req.pageId).domWait(req.selector ?? "", req.timeoutMs);
-        return { id, ok: true };
-      case "page.url":
-        return { id, ok: true, url: pageById(req.pageId).url() };
-      case "page.title":
-        return { id, ok: true, title: await pageById(req.pageId).title() };
-      case "page.close":
-        await pageById(req.pageId).close();
-        return { id, ok: true };
-      case "page.bring-to-front":
-        if (activeRunConn) return { id, ok: false, error: "run 不抢前台" };
-        await pageById(req.pageId).bringToFront();
-        return { id, ok: true };
-
-      case "record.start": {
-        if (activeRunConn) return { id, ok: false, error: "run 进行中；请等结束再 record start" };
-        if (recordBusy) return { id, ok: false, error: "record 操作进行中" };
-        recordBusy = true;
+        if (activeRunConn) throw Object.assign(new Error("run 进行中"), { code: RPC_ERRORS.RUN_BUSY });
+        const record = liveRecordName(); if (record) throw Object.assign(new Error(`record ${record} 仍在进行；请先 record stop/abort`), { code: RPC_ERRORS.RUN_BUSY });
+        if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY });
+        activeRunConn = conn; conn.runActive = true;
         try {
-          await setIgnoreCertificateErrors(browser!.raw, true);
-          const text = await startRecord(browser!, context!, { name: req.name });
-          return { id, ok: true, text };
+          browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS; await setIgnoreCertificateErrors(browser!.raw, true);
+          const page = await context!.newPage(); return { pageId: page.targetId };
         } catch (error) {
-          await finishRecord("abort").catch(warnCatch("record start abort"));
+          await runEnd(conn);
           throw error;
-        } finally {
-          recordBusy = false;
-          if (!liveRecordName()) await settleIdle();
         }
       }
-      case "record.stop": {
-        if (recordBusy) return { id, ok: false, error: "record 操作进行中" };
-        recordBusy = true;
-        try {
-          const text = await finishRecord("stop");
-          return { id, ok: true, text };
-        } finally {
-          recordBusy = false;
-          await settleIdle();
-        }
+      case "run.end": await runEnd(conn); return {};
+      case "cdp.send": {
+        if (!conn.runActive) throw new Error("cdp.send 只能在 run 中使用");
+        const scope = scopeOf(params.scope); const method = String(params.method ?? ""); if (!method) throw Object.assign(new Error("缺少 CDP method"), { code: RPC_ERRORS.INVALID_PARAMS });
+        assertCdpAllowed(method);
+        return await browser!.raw.send(method, (params.params as Record<string, unknown> | undefined) ?? {}, sessionIdOf(scope), typeof params.timeoutMs === "number" ? params.timeoutMs : undefined);
       }
-      case "record.abort": {
-        if (recordBusy) return { id, ok: false, error: "record 操作进行中" };
-        recordBusy = true;
-        try {
-          const text = await finishRecord("abort");
-          return { id, ok: true, text };
-        } finally {
-          recordBusy = false;
-          await settleIdle();
-        }
+      case "cdp.subscribe": {
+        if (!conn.runActive) throw new Error("cdp.subscribe 只能在 run 中使用");
+        const subscriptionId = String(params.subscriptionId ?? ""); const event = String(params.event ?? ""); const scope = scopeOf(params.scope);
+        if (!subscriptionId || !event || conn.subscriptions.has(subscriptionId)) throw Object.assign(new Error("无效 subscription"), { code: RPC_ERRORS.INVALID_PARAMS });
+        const off = browser!.raw.on(event, (value, sessionId) => { if (sameScope(scope, sessionId)) conn.write({ jsonrpc: "2.0", method: "cdp.event", params: { subscriptionId, event, value } }); });
+        conn.subscriptions.set(subscriptionId, { scope, event, off }); return {};
       }
-      default:
-        return { id, ok: false, error: `未知 op：${(req as SessionRequest).op}` };
+      case "cdp.unsubscribe": { const subscriptionId = String(params.subscriptionId ?? ""); const subscription = conn.subscriptions.get(subscriptionId); if (!subscription) return {}; subscription.off(); conn.subscriptions.delete(subscriptionId); return {}; }
+      case "record.start": {
+        if (activeRunConn) throw Object.assign(new Error("run 进行中；请等结束再 record start"), { code: RPC_ERRORS.RUN_BUSY });
+        if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY }); recordBusy = true;
+        try { await setIgnoreCertificateErrors(browser!.raw, true); return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
+        catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
+        finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }
+      }
+      case "record.stop": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("stop"); } finally { recordBusy = false; await settleIdle(); } }
+      case "record.abort": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("abort"); } finally { recordBusy = false; await settleIdle(); } }
+      default: throw Object.assign(new Error(`未知 method：${String(req.method)}`), { code: RPC_ERRORS.METHOD_NOT_FOUND });
     }
-  } finally {
-    if (browser) browser.raw.rpc = undefined;
-  }
+  } finally { if (browser) browser.raw.rpc = undefined; }
 }
 
-async function handle(req: SessionRequest, conn: ConnState): Promise<SessionResponse> {
-  const t0 = Date.now();
-  try {
-    const res = await handleOp(req, conn);
-    logger.info(res.ok ? "op ok" : "op error", {
-      op: req.op,
-      id: req.id,
-      ms: Date.now() - t0,
-      err: res.error ?? res.status,
-    });
-    return res;
-  } catch (err) {
-    logger.warn("op throw", {
-      op: req.op,
-      id: req.id,
-      ms: Date.now() - t0,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-}
-
-async function shutdown(code: number): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info(`exit ${code}`);
-  if (liveRecordName()) {
-    await finishRecord("disconnect").catch(warnCatch("disconnect flush"));
-  }
-  await context?.closeRunWindow().catch(warnCatch("closeRunWindow"));
-  await settleIdle().catch(warnCatch("settleIdle"));
-  server?.close();
-  if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true });
-  fs.rmSync(SESSION_PID_FILE, { force: true });
-  if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome"));
-  process.exit(code);
-}
+function responseError(id: string, error: unknown): JsonRpcResponse { const status = handshakeStatusFromError(error); if (status) return { jsonrpc: "2.0", id, error: { code: RPC_ERRORS.HANDSHAKE, message: HANDSHAKE_GUIDES[status], data: { status } } }; const value = error as { code?: number; data?: unknown }; return { jsonrpc: "2.0", id, error: { code: typeof value?.code === "number" ? value.code : RPC_ERRORS.INTERNAL, message: error instanceof Error ? error.message : String(error), ...(value?.data === undefined ? {} : { data: value.data }) } }; }
 
 function onConnection(socket: net.Socket): void {
-  const conn: ConnState = { runActive: false };
-  let buf = "";
-  let chain: Promise<void> = Promise.resolve();
-  const write = (res: SessionResponse): void => {
-    if (!socket.destroyed) socket.write(`${JSON.stringify(res)}\n`);
-  };
+  let buffer = ""; let writing = false; let queuedBytes = 0; const responses: string[] = []; const notifications: string[] = [];
+  const flush = (): void => { if (writing || socket.destroyed) return; const message = responses.shift() ?? notifications.shift(); if (!message) return; queuedBytes -= Buffer.byteLength(message); writing = true; socket.write(message, () => { writing = false; flush(); }); };
+  const write = (message: JsonRpcResponse | JsonRpcNotification, priority = false): void => { const line = `${JSON.stringify(message)}\n`; const bytes = Buffer.byteLength(line); if (bytes > MAX_MESSAGE_BYTES || queuedBytes + bytes > MAX_QUEUE_BYTES) { void runEnd(conn).finally(() => socket.destroy()); return; } (priority ? responses : notifications).push(line); queuedBytes += bytes; flush(); };
+  const conn: ConnState = { runActive: false, subscriptions: new Map(), write };
   socket.on("data", (chunk) => {
-    buf += chunk;
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (!line.trim()) continue;
-      let req: SessionRequest;
-      try {
-        req = JSON.parse(line) as SessionRequest;
-      } catch {
-        write({ id: "", ok: false, error: "bad json" });
-        continue;
-      }
-      // 每条连接内串行执行，避免并发改 context
-      chain = chain.then(() =>
-        handle(req, conn)
-          .then(write)
-          .catch((err) => {
-            const status = handshakeStatusFromError(err);
-            if (status) {
-              write({ id: req.id, ok: false, status, guide: HANDSHAKE_GUIDES[status] });
-            } else {
-              write({ id: req.id, ok: false, error: err instanceof Error ? err.message : String(err) });
-            }
-          }),
-      );
+    buffer += chunk.toString(); if (Buffer.byteLength(buffer) > MAX_MESSAGE_BYTES) { write({ jsonrpc: "2.0", id: "", error: { code: RPC_ERRORS.INVALID_REQUEST, message: "RPC message too large" } }, true); socket.end(); return; }
+    let nl: number; while ((nl = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1); if (!line.trim()) continue; let req: JsonRpcRequest; try { req = JSON.parse(line) as JsonRpcRequest; } catch { write({ jsonrpc: "2.0", id: "", error: { code: RPC_ERRORS.PARSE, message: "Parse error" } }, true); continue; }
+      if (req.jsonrpc !== "2.0" || typeof req.id !== "string" || typeof req.method !== "string") { write({ jsonrpc: "2.0", id: typeof req.id === "string" ? req.id : "", error: { code: RPC_ERRORS.INVALID_REQUEST, message: "Invalid Request" } }, true); continue; }
+      void dispatch(req, conn).then((result) => write({ jsonrpc: "2.0", id: req.id, result }, true), (error) => write(responseError(req.id, error), true));
     }
   });
-  socket.on("close", () => {
-    if (conn.runActive) void runEnd().catch(warnCatch("run cleanup on close"));
-  });
-  socket.on("error", () => {
-    /* client 断开，close 会兜底清理 */
-  });
+  socket.on("close", () => { clearSubscriptions(conn); if (conn.runActive) void runEnd(conn).catch(warnCatch("run cleanup on close")); });
+  socket.on("error", () => {});
 }
+
+async function shutdown(code: number): Promise<void> { if (shuttingDown) return; shuttingDown = true; if (liveRecordName()) await finishRecord("disconnect").catch(warnCatch("disconnect flush")); await context?.closeRunWindow().catch(warnCatch("closeRunWindow")); await settleIdle().catch(warnCatch("settleIdle")); server?.close(); if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); fs.rmSync(SESSION_PID_FILE, { force: true }); if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome")); process.exit(code); }
 
 export async function runHolder(): Promise<void> {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
-  setLogFile(SESSION_LOG);
-  fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 });
-  ensureHomeLayout();
-  await sweepDeadActive().catch(warnCatch("sweepDeadActive"));
-
-  logger.info(`starting pid=${process.pid}`);
-
-  process.on("SIGINT", () => void shutdown(0));
-  process.on("SIGTERM", () => void shutdown(0));
-  process.on("uncaughtException", (err) => {
-    logger.error("uncaughtException", err);
-    void shutdown(1);
-  });
-  process.on("unhandledRejection", (err) => {
-    logger.error("unhandledRejection", err);
-    void shutdown(1);
-  });
-
-  if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true });
-  server = net.createServer(onConnection);
-  await new Promise<void>((resolve, reject) => {
-    server!.listen(SESSION_SOCK, () => resolve());
-    server!.on("error", reject);
-  });
-  if (SESSION_SOCK_IS_FILE) fs.chmodSync(SESSION_SOCK, 0o600);
-  logger.info(`listen ${SESSION_SOCK}`);
-
-  chromeReady = tryConnectChrome();
-  try {
-    await chromeReady;
-  } catch (err) {
-    const status = handshakeStatusFromError(err);
-    if (status) logger.warn(HANDSHAKE_MARKS[status]);
-    else logger.error("connect failed", err);
-    await shutdown(1);
-    return;
-  }
-
-  await new Promise(() => {
-    /* keep alive：CDP 连接 + socket */
-  });
+  fs.mkdirSync(SESSION_DIR, { recursive: true }); setLogFile(SESSION_LOG); fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 }); ensureHomeLayout(); await sweepDeadActive().catch(warnCatch("sweepDeadActive"));
+  process.on("SIGINT", () => void shutdown(0)); process.on("SIGTERM", () => void shutdown(0)); process.on("uncaughtException", (error) => { logger.error("uncaughtException", error); void shutdown(1); }); process.on("unhandledRejection", (error) => { logger.error("unhandledRejection", error); void shutdown(1); });
+  if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); server = net.createServer(onConnection); await new Promise<void>((resolve, reject) => { server!.listen(SESSION_SOCK, resolve); server!.on("error", reject); }); if (SESSION_SOCK_IS_FILE) fs.chmodSync(SESSION_SOCK, 0o600);
+  chromeReady = tryConnectChrome(); try { await chromeReady; } catch (error) { const status = handshakeStatusFromError(error); if (status) logger.warn(HANDSHAKE_MARKS[status]); else logger.error("connect failed", error); await shutdown(1); return; }
+  await new Promise(() => {});
 }
 
-runHolder().catch((err) => {
-  const status = handshakeStatusFromError(err);
-  if (status) logger.warn(HANDSHAKE_MARKS[status]);
-  else logger.error("holder start failed", err);
-  void shutdown(1);
-});
+runHolder().catch((error) => { const status = handshakeStatusFromError(error); if (status) logger.warn(HANDSHAKE_MARKS[status]); else logger.error("holder start failed", error); void shutdown(1); });

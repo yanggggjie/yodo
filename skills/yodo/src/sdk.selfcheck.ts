@@ -1,79 +1,52 @@
-// sdk 客户端全链路自检：用 mock holder（socket）代替真 Chrome，验证
-// ensureHolder(ping) → HolderConn 多 op → run.begin/new-page/goto/evaluate/run.end
-// → fn+args 序列化把参数带到了 holder → success JSON 直出。
 import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// 必须在 import sdk/constants 之前改 HOME，让 SESSION_SOCK 指向临时目录
-const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-sdk-"));
-process.env.HOME = HOME;
-
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-sdk-"));
+process.env.HOME = TEST_HOME;
 const { SESSION_DIR, SESSION_SOCK, SESSION_PID_FILE } = await import("./utils/constants.ts");
 fs.mkdirSync(SESSION_DIR, { recursive: true });
-fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`); // 让 ensureAttached 认为 holder 活着
+fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`);
 
 const seen: string[] = [];
-const server = net.createServer((sock) => {
-  let buf = "";
-  sock.on("data", (c) => {
-    buf += c.toString();
+const server = net.createServer((socket) => {
+  let buffer = "";
+  socket.on("data", (chunk) => {
+    buffer += chunk.toString();
     let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (!line.trim()) continue;
-      const req = JSON.parse(line);
-      seen.push(req.op);
-      let res: Record<string, unknown> = { id: req.id, ok: true };
-      if (req.op === "ping") res = { id: req.id, ok: true, pid: process.pid, chrome: "mock", pages: 0, record: null };
-      else if (req.op === "context.new-page") res = { id: req.id, ok: true, pageId: "P1", url: "about:blank" };
-      else if (req.op === "page.evaluate") res = { id: req.id, ok: true, value: { exprHasArg: String(req.expr).includes('"hi"') } };
-      sock.write(`${JSON.stringify(res)}\n`);
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const request = JSON.parse(buffer.slice(0, nl)); buffer = buffer.slice(nl + 1); seen.push(request.method);
+      let result: unknown = {};
+      if (request.method === "ping") result = { pid: process.pid, chrome: "mock", pages: 1, record: null };
+      if (request.method === "run.begin") result = { pageId: "P1" };
+      if (request.method === "cdp.send") result = { result: { value: "ok" } };
+      if (request.method === "cdp.subscribe") {
+        socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
+        socket.write(`${JSON.stringify({ jsonrpc: "2.0", method: "cdp.event", params: { subscriptionId: request.params.subscriptionId, event: request.params.event, value: { timestamp: 1 } } })}\n`);
+        continue;
+      }
+      socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
     }
   });
 });
-await new Promise<void>((r) => server.listen(SESSION_SOCK, () => r()));
+await new Promise<void>((resolve) => server.listen(SESSION_SOCK, resolve));
 
 const { yodo } = await import("./sdk.ts");
-
-// 捕获 yodo.run 最终打印的 success JSON
-const out: string[] = [];
-const orig = console.log;
-console.log = (...a: unknown[]) => out.push(a.map(String).join(" "));
-process.argv[1] = path.join(HOME, "faketask.js");
-
+const output: string[] = []; const original = console.log; console.log = (...args) => output.push(args.map(String).join(" "));
+process.argv[1] = path.join(TEST_HOME, "faketask.js");
 try {
-  await yodo.run(async ({ browserContext }) => {
-    const page = await browserContext.newPage();
-    await page.goto("https://x.test/y");
-    await page.dom.wait("#q");
-    await page.dom.fill("#q", "hello");
-    await page.dom.press("#q", "Enter");
-    await page.dom.scroll(undefined, { deltaY: 500 });
-    await page.dom.check("#agree", true);
-    await page.dom.select("#city", "shanghai");
-    await page.dom.click("#go");
-    return page.evaluate(async (k: string) => ({ k }), "hi");
+  await yodo.run(async ({ page, _cdp }) => {
+    assert.equal(page._targetId, "P1");
+    assert.ok(_cdp.connection && _cdp.browser);
+    const event = page.cdp.once("Page.loadEventFired");
+    await page.cdp.send("Runtime.evaluate", { expression: "1" });
+    await event;
+    return "done";
   });
-} finally {
-  console.log = orig;
-  server.close();
-  fs.rmSync(HOME, { recursive: true, force: true });
-}
+} finally { console.log = original; server.close(); fs.rmSync(TEST_HOME, { recursive: true, force: true }); }
 
-const printed = out.join("\n");
-const parsed = JSON.parse(printed);
-assert.equal(parsed.status, "success", `期望 success，得到：${printed}`);
-assert.deepEqual(parsed.result, { exprHasArg: true }, "evaluate 的 fn+args 应把参数序列化传到 holder");
-assert.deepEqual(
-  seen,
-  ["ping", "run.begin", "context.new-page", "page.goto", "page.dom-wait", "page.dom-fill", "page.dom-press", "page.dom-scroll", "page.dom-check", "page.dom-select", "page.dom-click", "page.evaluate", "run.end"],
-  `op 顺序不对：${seen.join(",")}`,
-);
-assert.equal(process.exitCode ?? 0, 0, "success 不应设非零退出码");
-
-console.log = orig;
+assert.equal(JSON.parse(output.join("\n")).status, "success");
+assert.deepEqual(seen, ["ping", "run.begin", "cdp.subscribe", "cdp.send", "cdp.unsubscribe", "run.end"]);
 console.log("sdk selfcheck ok");

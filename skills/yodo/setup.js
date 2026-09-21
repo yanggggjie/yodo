@@ -18,9 +18,11 @@ if (!Number.isFinite(major) || major < 24) {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, "src");
 const DEST = path.join(os.homedir(), ".yodo", "src");
+const SESSION = path.join(os.homedir(), ".yodo", "session");
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
 await stopCurrentHolder();
+fs.rmSync(SESSION, { recursive: true, force: true });
 copyRuntime(SRC, DEST);
 fs.copyFileSync(path.join(HERE, "LICENSE"), path.join(DEST, "LICENSE"));
 console.log(`yodo src 拷贝 → ${DEST}`);

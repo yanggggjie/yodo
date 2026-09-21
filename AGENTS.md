@@ -80,8 +80,9 @@ skills/yodo/
 
 | 组成 | 文件 | 职责 |
 |---|---|---|
-| SDK | `src/sdk.ts` | 对外暴露 yodo API，并在 client 进程运行 `task` 闭包 |
-| 薄脚本 | `src/bin/*.js` | 组合 SDK，提供可直接执行的入口 |
+| Task SDK | `src/sdk.ts` | 只向 task 暴露 `yodo.run()`，并在 client 进程运行 task 闭包 |
+| Control | `src/control.ts`、`src/bin/*.js` | 安装后运行 start、stop、init、doctor 和 record 管理命令 |
+| task lib | `src/templates/task-lib/` | 向 task 提供通用且有完整行为保证的 helper |
 | `task` | 自执行程序 | 使用 SDK 完成一个可独立执行和复用的流程 |
 
 修改 `capability` 时，不直接编辑 `~/.yodo/task` 中的文件。先复制到 `~/.yodo/temp` 作为 `candidate`，验证成功后再替换原文件；验证前必须保留原版本。
@@ -90,18 +91,14 @@ skills/yodo/
 
 `src/holder.ts` 是常驻进程，持有唯一 CDP 连接以维持 Chrome 远程调试授权。实测连接数归零时授权失效，因此 holder 必须常驻。
 
-holder 通过 socket 暴露高层 op：
+holder 通过 socket 暴露运行生命周期、通用 CDP 和 record RPC：
 
 ```text
 run.begin
 run.end
-page.goto
-page.evaluate
-page.url
-page.title
-page.close
-page.bring-to-front
-context.new-page
+cdp.send
+cdp.subscribe
+cdp.unsubscribe
 record.*
 ping
 ```
@@ -110,9 +107,9 @@ ping
 
 ### 4.3 client
 
-client 位于 `src/sdk.ts`。`yodo.run(fn)` 在当前 client 进程运行 `task` 闭包；`browserContext` 和 `page` 是 proxy，通过 socket 委托 holder 执行 CDP 并回传结果。
+client 位于 `src/sdk.ts`。`yodo.run(fn)` 在当前 client 进程运行 task 闭包，并直接提供当前 task 独占的运行页面 `page`。`page.cdp` 通过 socket 委托 holder 执行页面级 CDP；高级 `_cdp.connection` 和 `_cdp.browser` 只用于 page scope 不足时的排障或能力探索。
 
-`page.evaluate(fn, args)` 由 client 将 `fn.toString()` 和参数拼成表达式后发送。
+task 常用导航、evaluate 和 DOM 操作从 `~/.yodo/task/lib/index.js` 导入。Task SDK 不公开 start、stop、init、doctor 或 record 管理能力。
 
 ### 4.4 `record`
 
