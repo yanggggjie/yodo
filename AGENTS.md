@@ -30,7 +30,7 @@ npm run dev:install
 - 不把 `node skills/yodo/setup.js` 当作日常开发入口。
 - 修改 `src/`、`skills/`、`templates/` 或 init 后，重新运行 `npm run dev:install`。
 - 开发安装不使用线上 `main`。
-- `~/.yodo/{task,temp,record,session}` 与运行时独立，更新不触碰这些用户数据。
+- 本地开发安装遵循与发布更新相同的数据规则：保留 `task` 和 `record`，不处理 `temp`，覆盖 `src`，清理并重建 `session`。
 
 ### 2.2 检查与测试
 
@@ -71,6 +71,30 @@ skills/yodo/
 - **发布**：不发布 npm 包，不创建 GitHub Release；把目标代码树合入 `main` 即完成发布。
 - **版本**：发布时把根 `package.json` 和 `skills/yodo/src/package.json` 更新为本次版本，并同步 `package-lock.json`。
 - **回溯**：需要可回溯版本时创建 `vX.Y.Z` tag。
+
+### 3.3 发布前更新审计
+
+只在准备合入 `main` 发布时进行更新审计，不要求每次开发修改都同步维护更新说明。
+
+发布前必须以“上一发布版本到当前待发布代码”的实际 diff 为准，统一更新 `skills/yodo/update.md`。`update.md` 只需简要介绍本版本的主要变化，重点说明用户数据是否受影响以及 agent 应如何迁移；它不是完整 changelog，也不记录开发过程中的中间方案。
+
+审计必须覆盖以下数据：
+
+| 数据 | 更新规则 |
+|---|---|
+| `~/.yodo/task` | 重要数据，必须保留。存在 API、目录或格式兼容性变化时，agent 必须先备份，再逐个修正并验证已有 task；setup 不自动改写 task。 |
+| `~/.yodo/record` | 保留原数据，不得修改或迁移已有 record。 |
+| `~/.yodo/temp` | 不重要，不处理，也不保证兼容。 |
+| `~/.yodo/src` | 直接覆盖为当前版本。 |
+| `~/.yodo/session` | 停止旧 holder 后直接清理，由当前版本重新建立。 |
+
+发布前必须确认：
+
+- `update.md` 描述的是从上一发布版本升级到当前版本所需的信息。
+- 已根据实际 diff 检查 API、目录、配置和数据格式的 breaking change。
+- task 存在兼容性变化时，`update.md` 给出明确的备份、修改和验证方法，并要求 agent 完成迁移。
+- `install.md` 链接 `update.md`。
+- setup 和迁移过程不会修改已有 record。
 
 ## 4. 运行时架构
 
