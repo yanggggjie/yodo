@@ -83,10 +83,10 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 
 ### 2.2 更新记录
 
-#### 待发布
+#### v1.1.0
 
-- 已学会的网站操作运行更稳定，并能覆盖更多页面交互。
-- 页面操作可以更准确地取得查询结果，并确认提交是否成功。
+- 优化了 task 表示。已学会的网站操作运行更稳定，并能覆盖更多页面交互。
+- 增加了 DOM 操作后读取 network response。查询结果和提交是否成功都更准确。
 
 #### v1.0.0
 
