@@ -97,10 +97,9 @@ skills/yodo/
 
 | 组成 | 文件 | 职责 |
 |---|---|---|
-| Task SDK | `src/sdk.ts` | 只向 task 暴露 `yodo.run()`，并在 client 进程运行 task 闭包 |
-| Control | `src/control.ts`、`src/bin/*.js` | 安装后运行 start、stop、init、doctor 和 record 管理命令 |
-| task lib | `src/templates/task-lib/` | 向 task 提供通用且有完整行为保证的 helper |
-| `task` | 自执行程序 | 使用 SDK 完成一个可独立执行和复用的流程 |
+| Task SDK |- | 只向 task 暴露 `yodo.run()`，并在 client 进程运行 task 闭包 |
+| task lib | `~/.yodo/task/task-lib/` | 向 task 提供通用且有完整行为保证的 helper |
+| `task` |  `~/.yodo/task` | 使用 SDK 完成一个可独立执行和复用的流程 |
 
 修改 `capability` 时，不直接编辑 `~/.yodo/task` 中的文件。先复制到 `~/.yodo/temp` 作为 `candidate`，验证成功后再替换原文件；验证前必须保留原版本。
 
