@@ -8,9 +8,9 @@ description: >-
 
 yodo 将 `user goal` 拆成一个或多个 `task`。每个 `task` 是可独立执行和复用的程序，使用 `network implementation` 或 `DOM implementation`。尚未验证的 `task` 是 `candidate`；使用正式参数验证成功并移入 `~/.yodo/task` 后，成为 `capability`。
 
-## 1. Glossary
+## 1. 术语与流程
 
-### 1.1 Canonical terms
+### 1.1 规范术语
 
 | Term | Definition | Not |
 |---|---|---|
@@ -30,7 +30,9 @@ yodo 将 `user goal` 拆成一个或多个 `task`。每个 `task` 是可独立�
 | `result` | `task` 在 `task status` 为 `success` 时返回的内容 | 不等于 `record material`、HTTP response 或 RPC response |
 | `network attempt` | `candidate` 使用正式参数完成一次 `task run` 并返回 `status: failure` | 语法错误、命令未启动、`need-*` 和用户取消不计入 |
 
-- 目录直接写实际路径；`task` 不用于指代 `~/.yodo/task` 或 `~/.yodo/temp` 目录。
+目录直接写实际路径；`task` 不用于指代 `~/.yodo/task` 或 `~/.yodo/temp` 目录。
+
+### 1.2 总体流程
 
 ```mermaid
 flowchart TD
@@ -64,7 +66,7 @@ flowchart TD
 ### 2.1 判断完成
 
 - 用户明确要求使用 yodo 时，必须匹配 `capability`，必要时完成 `recording` 和学习，再运行全部 `task`。
-- 每个 `task` 只有在对应 `capability` 或 `candidate` 使用本次正式参数输出 `status: success` 后才完成。`record material`、network response、HTML snapshot、DOM event、`status: stopped`、HTTP 2xx、holder 的 `ok`、找到元素或完成 click 都不能作为 `result` 或成功依据。
+- 每个 `task` 只有在对应 `capability` 或 `candidate` 使用本次正式参数输出 `status: success` 后才完成。`record material` 中保存的历史 response、HTML snapshot、DOM event、`status: stopped`、HTTP 2xx、holder 的 `ok`、找到元素或完成 click 都不能作为本次 `result` 或成功依据；DOM `candidate` 本次运行捕获并验证的 response 可以作为成功依据和 `result` 来源。
 - 多个 `task` 按原始顺序串行运行，禁止并行。根据 task 判断最终结果存在可靠 URL 时，在报告中给出该 URL。
 - 有副作用的操作只允许成功一次，并遵守“有副作用的操作”中的检查规则。
 
@@ -82,7 +84,7 @@ flowchart TD
 - network 阶段只能读取 `network material`。
 - 当前 `task` 没有累计 2 次 `network attempt` 时，禁止读取、搜索或推断 `DOM material`。
 - DOM 阶段必须以本次 `record` 的 `DOM/DOMTimeline.jsonl` 为起点；没有该 material 时不得自行探索网站。
-- 进入 DOM 阶段后，可以读取当前运行窗口的 DOM 并自主定位、判断和操作，但只能完成当前 `task`。
+- 进入 DOM 阶段后，可以继续使用当前 `task` 的 `network material` 确定目标 request、成功 response 和 `result` 字段，也可以读取当前运行窗口的 DOM 并自主定位、判断和操作，但只能完成当前 `task`。
 
 ### 2.4 用户侧信息
 
@@ -90,9 +92,9 @@ flowchart TD
 - 不暴露 `task` 拆分、文件名、argv、`network attempt` 次数、`implementation` 选择或 `record` 路径。
 - 当前材料无法继续时，直接说明这项操作目前无法稳定学会，不要求再次演示。
 
-## 3. 处理 `command status`
+## 3. 命令结果
 
-### 3.1 根据 stdout 处理
+### 3.1 处理 `command status`
 
 每条 yodo 命令先读 stdout：
 
@@ -163,7 +165,7 @@ node ~/.yodo/task/<name>.js <参数>
 
 修改有副作用的 `capability` 时，必须先查询目标状态。原 `capability` 可能已经成功但 `result` 解析失败，或无法确认操作是否已经发生时，不创建或运行 `candidate`，直接停止并告诉用户。
 
-## 6. 完成一次 `recording`
+## 6. Recording
 
 ### 6.1 开始并等待演示
 
@@ -191,7 +193,7 @@ node ~/.yodo/src/bin/record-stop.js
 node ~/.yodo/src/bin/record-abort.js
 ```
 
-### 6.3 识别 `record` 内容
+### 6.3 读取 `record`
 
 一个 `record` 包含：
 
@@ -211,7 +213,7 @@ stop 返回的 `name` 是本次最终 `record` name，且必须等于 `recordDir
 
 `DOM/DOMTimeline.jsonl` 保存同一批 event 的完整版本，两份材料用相同 `eventId`。完整 event 包含目标元素、最多 3 层父元素和 2 层子元素的标签、id、class、attribute 与 selector，以及经过限制的状态数据。另有 `final-state` 保存录制结束时的 URL、title 和有限 interactive element 摘要。
 
-## 7. 使用 `network material` 学习
+## 7. Network 学习
 
 ### 7.1 选择当前 `task` 的材料
 
@@ -276,9 +278,9 @@ node ~/.yodo/temp/<name>.js <参数>
 
 第 2 次 `failure`：立即结束当前 `task` 的 network 阶段，才允许读取同一 `record` 的 `DOM material`。
 
-## 8. 使用 `DOM material` 学习
+## 8. DOM 学习
 
-### 8.1 选择当前 `task` 的 event
+### 8.1 选择材料
 
 只有当前 `task` 已累计 2 次 `network attempt`，才允许读取：
 
@@ -286,7 +288,7 @@ node ~/.yodo/temp/<name>.js <参数>
 recordDir/DOM/DOMTimeline.jsonl
 ```
 
-`DOM material` 属于整个 `record`，不按 `task` 预先切分。根据用户操作清单、event 顺序、URL、target 信息和 network timeline 的时间关系，选出当前 `task` 的相关 event。
+`DOM material` 属于整个 `record`，不按 `task` 预先切分。根据用户操作清单、event 顺序、URL、target 信息和 network timeline 的时间关系，选出当前 `task` 的相关 event。继续使用当前 `task` 已确认的 request 和 response 信息。
 
 根 timeline 与完整 DOM timeline 使用相同 `eventId`。只有进入 DOM 阶段后，才能根据 `eventId` 打开或搜索完整 event。
 
@@ -303,21 +305,52 @@ recordDir/DOM/DOMTimeline.jsonl
  * @record search-a7f3c1
  * @param argv[2] 搜索词
  */
-import { yodo, goto, evaluate, fill, press, waitForSelector } from "../task/lib/index.js";
+import { yodo, goto, fill, press, waitForSelector } from "../task/lib/index.js";
 
 const query = process.argv[2] ?? "";
 
 await yodo.run(async ({ page }) => {
   await goto(page, "https://example.com/search");
   await waitForSelector(page, 'input[name="q"]');
-  await fill(page, 'input[name="q"]', query);
-  await press(page, 'input[name="q"]', "Enter");
-  await waitForSelector(page, ".result-list");
-  const result = await evaluate(page, () => ({ count: document.querySelectorAll(".result-item").length }));
-  if (result.count === 0) throw new Error("没有查询到搜索结果");
-  return result;
+
+  await page.cdp.send("Network.enable");
+  let requestId;
+  let resolveFinished;
+  let rejectFinished;
+  const finished = new Promise((resolve, reject) => {
+    resolveFinished = resolve;
+    rejectFinished = reject;
+  });
+
+  const offRequest = await page.cdp.on("Network.requestWillBeSent", (event) => {
+    const url = new URL(event.request.url);
+    if (url.pathname === "/api/search" && url.searchParams.get("q") === query) {
+      requestId = event.requestId;
+    }
+  });
+  const offFinished = await page.cdp.on("Network.loadingFinished", (event) => {
+    if (event.requestId === requestId) resolveFinished();
+  });
+  const offFailed = await page.cdp.on("Network.loadingFailed", (event) => {
+    if (event.requestId === requestId) rejectFinished(new Error(event.errorText));
+  });
+
+  try {
+    await fill(page, 'input[name="q"]', query);
+    await press(page, 'input[name="q"]', "Enter");
+    await finished;
+    const response = await page.cdp.send("Network.getResponseBody", { requestId });
+    const result = JSON.parse(response.body);
+    return { items: result.items, total: result.total };
+  } finally {
+    await offFailed();
+    await offFinished();
+    await offRequest();
+  }
 });
 ```
+
+这是最小示例。实际 candidate 只匹配 `network material` 已确认的 request 特征，并检查 response 中与当前 `task` 有关的字段。没有合适 response 时仍可读取 DOM。
 
 优先使用 `lib` 中已有的通用操作：
 
@@ -334,23 +367,30 @@ DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 
 
 ### 8.3 运行和验证 DOM `candidate`
 
-进入 DOM 阶段后可以：
+**允许：**
 
 - 使用录制 selector，或根据当前 DOM 重新定位目标；
+- 使用当前 `task` 的 `network material` 匹配 DOM 操作触发的 request，并从本次 response 取得 `result`；
 - 读取当前 DOM 并根据页面状态决定下一步；
 - 操作 `record` 中的 event 未直接包含、但完成当前 `task` 必需的中间元素；
 - 点击、填写、提交、滚动、等待和处理 navigation。
 
-仍然不得：
+**禁止：**
 
 - 操作用户已有 tab；
 - 离开当前 `task` 自行探索其它操作；
 - 使用 `DOM material` 直接回答 `result` 而不运行 `candidate`；
 - 猜测 `record` 和当前页面都没有提供依据的流程。
 
-使用 `DOM implementation` 的 `candidate` 不沿用 2 次 `network attempt` 限制。每次修改必须依据 `DOMTimeline.jsonl`、明确运行错误或当前页面可观察状态；没有下一步依据时停止，不机械重试。
+**修改依据：** `DOM implementation` 的 `candidate` 不沿用 2 次 `network attempt` 限制。每次修改必须依据 `DOMTimeline.jsonl`、明确运行错误或当前页面可观察状态；没有下一步依据时停止，不机械重试。
 
-每个 DOM `candidate` 必须执行前查询当前状态，并在操作后再次查询业务状态。已有目标状态时直接返回；否则执行操作并验证。selector 存在、click 未报错、URL 变化、navigation、toast 或 holder `ok` 都不能单独作为成功。优先使用只读业务查询，其次使用稳定页面状态；无法可靠验证时不得晋升。
+**读取 response：** DOM 操作会触发已知业务 request 时，在操作前注册 Network listener，按当前正式参数匹配 request，通过同一个 `requestId` 等待 response 完成，再读取本次 response body。recording 中保存的历史 response 只用于编写判断，不能代替本次运行。
+
+**判断结果：** response 能完整表达查询结果或操作结果时，检查与当前 `task` 对应的业务字段，并直接返回结构化 `result`，不必再解析结果 DOM。没有稳定 response，或 `task` 目标本身是页面状态时，使用稳定页面状态。response 只表示已接收、操作异步完成或无法安全重复时，还必须查询最终业务状态。
+
+`Network.requestWillBeSent`、HTTP 2xx、URL 变化、navigation、toast、holder `ok`、找到元素或 click 未报错都不能单独作为成功依据。
+
+**保护副作用：** 有副作用的 DOM `candidate` 必须执行前查询当前状态。已有目标状态时直接返回；否则执行操作并按上述规则验证。无法可靠确认操作结果时不得重试或晋升。提交型 candidate 先监听 recording 已确认的提交 request，再 click；response 完成后检查业务成功字段并返回新对象 ID 或状态。若 response 只表示任务已接收，再查询最终业务状态。
 
 `candidate` 输出 `status: success` 后移入 `~/.yodo/task`，不从该目录再次运行。
 
@@ -358,13 +398,21 @@ DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 
 
 ### 9.1 使用 SDK
 
+**入口与参数：**
+
 - 从 `../task/lib/index.js` 导入 `yodo` 和需要的 helper。
 - 每次变化或跨 `task` 传递的值必须走 `process.argv`。
 - `yodo.run(async ({ page }) => ...)` 直接提供当前 task 独占的运行页面，不连接用户已有 tab。
 - `yodo` 对 task 只公开 `run()`；参数在调用前从 `process.argv` 读取。
+
+**选择 API：**
+
 - 已有 `lib` helper 能完整表达操作时必须使用 helper；没有 helper 的单个 CDP command/event 可以使用 `page.cdp.send/on/once`。
 - 只有 page scope 无法完成必要观察或操作时，才使用 callback 中带下划线的 `_cdp.connection` 或 `_cdp.browser`。不得关闭用户 target/browser、detach holder session、修改 holder 全局 attach/discover 状态或留下跨 task 状态。
 - `page._targetId` 只用于 `_cdp` 排障与 target 关联；不公开 CDP session ID。
+
+**调用约束：**
+
 - `goto(page, url, { timeout }?)` 不支持 `waitUntil`。
 - `evaluate(page, fn, ...args)` 的参数必须可 JSON 序列化，函数不能依赖外层闭包。
 - 一次只运行一个 task；确需把多个操作作为一个批次完成时，编写一个新的 task，在同一次 `yodo.run()` 中顺序执行。
@@ -374,14 +422,6 @@ DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 
 ### 9.2 回查来源 `record`
 
 正常匹配 `capability` 时不读取 `record`。只有 `@summary` 明确匹配当前需要完成的流程，且流程不需要修改，只是 argv、固定字段、response 字段、selector 或验证字段含义不清晰，并且 `task` 代码和注释无法解释时，才允许回查 `@record`。
-
-- 从最后一个 `@record` 开始倒序读取。
-- 先读根 `timeline.jsonl` 和 `task` 直接引用的 network request 文件。
-- 使用 `network implementation` 的 `task` 默认不读完整 DOM timeline；使用 `DOM implementation` 的 `task` 可以读取其明确引用 `record` 的完整 DOM timeline。
-- 找到字段含义后立即停止，不浏览无关 material。
-- 不扫描未引用 `record`，不用历史 `result` 代替本次正式执行。
-- 修改 `capability` 时，已有来源 `record` 只用于解释原实现；需要新的页面行为或 network request 证据时必须完成新 `recording`。
-- 新 `recording` 的 name 追加到原有 `@record`；`candidate` 验证成功后才替换 `capability`。
 
 ## 10. 保护有副作用的操作
 
