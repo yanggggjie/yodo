@@ -3,46 +3,69 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  DEFAULT_CDP_PORT,
   CdpError,
   NeedAllowError,
   NeedChromeError,
-  NeedCdpPortError,
+  NeedFileAccessError,
   NeedInstallError,
+  NeedRemoteDebuggingError,
   chromeInstalled,
-  configuredCdpPort,
-  parseCdpPort,
-  parseCdpPortConfig,
+  endpointFromActivePort,
+  parseDevToolsActivePort,
+  readDevToolsActivePort,
 } from "./connect.ts";
 import { handshakeStatusFromError } from "../protocol.ts";
 
 assert.equal(typeof chromeInstalled(), "boolean");
 
-assert.equal(DEFAULT_CDP_PORT, 9222);
-assert.equal(parseCdpPort("54321"), 54321);
-assert.equal(parseCdpPort("0"), null);
-assert.equal(parseCdpPort("65536"), null);
-assert.equal(parseCdpPort(" 9222"), null);
-assert.equal(parseCdpPort("9222;echo bad"), null);
-assert.equal(parseCdpPortConfig("YODO_CDP_PORT=54321\n"), 54321);
-assert.equal(parseCdpPortConfig("export YODO_CDP_PORT=54321\n"), null);
-assert.equal(parseCdpPortConfig("YODO_CDP_PORT=54321\nOTHER=x\n"), null);
-assert.equal(configuredCdpPort("12345", "/missing"), 12345);
-assert.equal(configuredCdpPort("bad", "/missing"), 9222);
+assert.deepEqual(parseDevToolsActivePort("54321\n/devtools/browser/abc\n"), {
+  port: 54321,
+  wsPath: "/devtools/browser/abc",
+});
+assert.deepEqual(parseDevToolsActivePort("54321\r\n/devtools/browser/abc\r\n"), {
+  port: 54321,
+  wsPath: "/devtools/browser/abc",
+});
+assert.equal(parseDevToolsActivePort("0\n/devtools/browser/abc\n"), null);
+assert.equal(parseDevToolsActivePort("65536\n/devtools/browser/abc\n"), null);
+assert.equal(parseDevToolsActivePort("9222\n"), null);
+assert.equal(parseDevToolsActivePort("9222\nnot-a-path\n"), null);
 
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-cdp-port-"));
-const configFile = path.join(tempDir, "config.env");
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-devtools-port-"));
+const activePortFile = path.join(tempDir, "DevToolsActivePort");
 try {
-  fs.writeFileSync(configFile, "YODO_CDP_PORT=54321\n", "utf8");
-  assert.equal(configuredCdpPort(undefined, configFile), 54321);
-  assert.equal(configuredCdpPort("12345", configFile), 12345);
+  fs.writeFileSync(activePortFile, "54321\n/devtools/browser/abc\n", "utf8");
+  assert.deepEqual(readDevToolsActivePort(activePortFile), {
+    port: 54321,
+    wsPath: "/devtools/browser/abc",
+  });
+  assert.equal(readDevToolsActivePort(path.join(tempDir, "missing")), null);
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
+const originalFetch = globalThis.fetch;
+try {
+  globalThis.fetch = async () => new Response(JSON.stringify({ webSocketDebuggerUrl: "ws://live" }));
+  assert.equal(await endpointFromActivePort({ port: 9222, wsPath: "/devtools/browser/file" }), "ws://live");
+  globalThis.fetch = async () => new Response(null, { status: 404 });
+  assert.equal(
+    await endpointFromActivePort({ port: 9222, wsPath: "/devtools/browser/file" }),
+    "ws://127.0.0.1:9222/devtools/browser/file",
+  );
+  globalThis.fetch = async () => new Response(null, { status: 403 });
+  await assert.rejects(
+    endpointFromActivePort({ port: 9222, wsPath: "/devtools/browser/file" }),
+    NeedAllowError,
+  );
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 assert.equal(handshakeStatusFromError(new NeedInstallError()), "need-install");
 assert.equal(handshakeStatusFromError(new NeedChromeError()), "need-chrome");
-assert.equal(handshakeStatusFromError(new NeedCdpPortError()), "need-cdp-port");
+assert.equal(handshakeStatusFromError(new NeedRemoteDebuggingError()), "need-remote-debugging");
+assert.equal(handshakeStatusFromError(new NeedFileAccessError("/tmp/x", new Error("denied"))), "need-file-access");
 assert.equal(
   handshakeStatusFromError(new CdpError("permission-blocked", "x")),
   "need-allow",

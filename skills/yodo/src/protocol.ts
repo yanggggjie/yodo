@@ -1,4 +1,4 @@
-export type HandshakeStatus = "need-install" | "need-chrome" | "need-cdp-port" | "need-allow";
+export type HandshakeStatus = "need-install" | "need-chrome" | "need-remote-debugging" | "need-file-access" | "need-allow";
 export type StdoutStatus = HandshakeStatus | "recording" | "stopped" | "aborted" | "idle" | "success" | "failure";
 export type CdpScope = { type: "connection" } | { type: "browser" } | { type: "page"; pageId: string };
 export type RpcMethod = "ping" | "run.begin" | "run.end" | "cdp.send" | "cdp.subscribe" | "cdp.unsubscribe" | "record.start" | "record.stop" | "record.abort";
@@ -13,10 +13,11 @@ export const RPC_ERRORS = { PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_F
 export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {
   "need-install": "没检测到 Google Chrome，装一下：https://www.google.com/chrome/ 。装好告诉我。",
   "need-chrome": "我已帮你启动 Chrome；没弹出来就手动打开它。好了告诉我。",
-  "need-cdp-port": "我没有在当前配置的 port 找到 Chrome remote debugging endpoint。我已打开 chrome://inspect/#remote-debugging（没跳转就手动贴这地址），确认「Allow remote debugging for this browser instance」已勾选，然后把页面显示的 port 数字告诉我。",
+  "need-remote-debugging": "我已打开 chrome://inspect/#remote-debugging（没跳转就手动贴这地址）。请勾选「Allow remote debugging for this browser instance」，然后告诉我。",
+  "need-file-access": "yodo 需要只读访问 Chrome 的 DevToolsActivePort，以取得 remote debugging 的 WebSocket endpoint。请在 System Settings > Privacy & Security 中，为当前运行 yodo 的应用打开对应的 Files and Folders 或 Full Disk Access 权限，然后重新运行原操作。",
   "need-allow": "Chrome 弹出「Allow remote debugging?」时点「Allow」。点了告诉我。",
 };
-export const HANDSHAKE_MARKS: Record<HandshakeStatus, string> = { "need-install": "yodo:need-install", "need-chrome": "yodo:need-chrome", "need-cdp-port": "yodo:need-cdp-port", "need-allow": "yodo:need-allow" };
+export const HANDSHAKE_MARKS: Record<HandshakeStatus, string> = { "need-install": "yodo:need-install", "need-chrome": "yodo:need-chrome", "need-remote-debugging": "yodo:need-remote-debugging", "need-file-access": "yodo:need-file-access", "need-allow": "yodo:need-allow" };
 const STATUSES = Object.keys(HANDSHAKE_MARKS) as HandshakeStatus[];
 export function isHandshakeStatus(status: string): status is HandshakeStatus { return status in HANDSHAKE_GUIDES; }
 export function handshakeStatusFromMark(text: string): HandshakeStatus | null { for (const status of STATUSES) if (text.includes(HANDSHAKE_MARKS[status])) return status; return null; }
@@ -24,7 +25,8 @@ export function handshakeStatusFromError(error: unknown): HandshakeStatus | null
   if (!(error instanceof Error)) return null;
   if (error.name === "NeedInstallError") return "need-install";
   if (error.name === "NeedChromeError") return "need-chrome";
-  if (error.name === "NeedCdpPortError") return "need-cdp-port";
+  if (error.name === "NeedRemoteDebuggingError") return "need-remote-debugging";
+  if (error.name === "NeedFileAccessError") return "need-file-access";
   if (error.name === "NeedAllowError") return "need-allow";
   const code = (error as { code?: string }).code;
   if (code === "permission-blocked") return "need-allow";

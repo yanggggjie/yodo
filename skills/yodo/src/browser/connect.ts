@@ -1,15 +1,13 @@
 /**
  * 主 Chrome（Stable）CDP connection。永不杀浏览器、永不关 tab。
- * 直接启动或激活 Chrome，只尝试固定 CDP port。
+ * 默认从 DevToolsActivePort 发现当前 browser WebSocket endpoint。
  */
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { sleep } from "../utils/async.ts";
 import { HANDSHAKE_GUIDES } from "../protocol.ts";
-import { SESSION_CONFIG_FILE } from "../utils/constants.ts";
 
 export type CdpErrorCode = "permission-blocked";
 
@@ -24,9 +22,8 @@ export class CdpError extends Error {
 
 const TOGGLE_PAGE_URL = "chrome://inspect/#remote-debugging";
 const CHROME_LAUNCH_MS = 1_500;
-const PORT_WAIT_MS = 2_000;
-const PORT_RETRY_MS = 200;
-export const DEFAULT_CDP_PORT = 9222;
+const ACTIVE_PORT_WAIT_MS = 2_000;
+const ACTIVE_PORT_RETRY_MS = 200;
 
 export class NeedInstallError extends Error {
   constructor() {
@@ -42,10 +39,20 @@ export class NeedChromeError extends Error {
   }
 }
 
-export class NeedCdpPortError extends Error {
+export class NeedRemoteDebuggingError extends Error {
   constructor() {
-    super(HANDSHAKE_GUIDES["need-cdp-port"]);
-    this.name = "NeedCdpPortError";
+    super(HANDSHAKE_GUIDES["need-remote-debugging"]);
+    this.name = "NeedRemoteDebuggingError";
+  }
+}
+
+export class NeedFileAccessError extends Error {
+  readonly filePath: string;
+  constructor(filePath: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`${HANDSHAKE_GUIDES["need-file-access"]} 文件：${filePath}。系统错误：${detail}`);
+    this.name = "NeedFileAccessError";
+    this.filePath = filePath;
   }
 }
 
@@ -54,6 +61,17 @@ export class NeedAllowError extends Error {
     super(HANDSHAKE_GUIDES["need-allow"]);
     this.name = "NeedAllowError";
   }
+}
+
+export function chromeUserDataDir(platform = process.platform): string {
+  if (platform === "darwin") {
+    return path.join(os.homedir(), "Library/Application Support/Google/Chrome");
+  }
+  if (platform === "win32") {
+    const local = process.env["LOCALAPPDATA"] ?? path.join(os.homedir(), "AppData", "Local");
+    return path.join(local, "Google", "Chrome", "User Data");
+  }
+  return path.join(os.homedir(), ".config", "google-chrome");
 }
 
 export function chromeAppPath(): string | null {
@@ -90,72 +108,45 @@ export function chromeInstalled(): boolean {
   return chromeAppPath() !== null;
 }
 
-function portLive(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect({ host: "127.0.0.1", port }, () => {
-      socket.end();
-      resolve(true);
-    });
-    socket.on("error", () => resolve(false));
-    socket.setTimeout(500, () => {
-      socket.destroy();
-      resolve(false);
-    });
-  });
+export type ActivePort = { port: number; wsPath: string };
+
+export function parseDevToolsActivePort(content: string): ActivePort | null {
+  const lines = content.split(/\r?\n/).map((line) => line.trim());
+  const portText = lines[0] ?? "";
+  const wsPath = lines[1] ?? "";
+  if (!/^\d+$/.test(portText)) return null;
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  if (!wsPath.startsWith("/")) return null;
+  return { port, wsPath };
 }
 
-async function wsFromHttp(port: number): Promise<string> {
+export function readDevToolsActivePort(filePath: string): ActivePort | null {
+  try {
+    return parseDevToolsActivePort(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    if (code === "EACCES" || code === "EPERM") throw new NeedFileAccessError(filePath, error);
+    throw error;
+  }
+}
+
+export async function endpointFromActivePort(active: ActivePort): Promise<string> {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+    response = await fetch(`http://127.0.0.1:${active.port}/json/version`, {
       signal: AbortSignal.timeout(1_000),
     });
   } catch {
-    throw new Error("fetch-failed");
+    return `ws://127.0.0.1:${active.port}${active.wsPath}`;
   }
-  if (response.status === 403) {
-    throw new CdpError("permission-blocked", HANDSHAKE_GUIDES["need-allow"]);
+  if (response.status === 403) throw new NeedAllowError();
+  if (response.status === 404 || !response.ok) {
+    return `ws://127.0.0.1:${active.port}${active.wsPath}`;
   }
-  if (!response.ok) throw new Error(`http-${response.status}`);
   const body = (await response.json()) as { webSocketDebuggerUrl?: string };
-  if (!body.webSocketDebuggerUrl) throw new Error("no-ws");
-  return body.webSocketDebuggerUrl;
-}
-
-export function parseCdpPort(value: string | undefined): number | null {
-  if (!value || !/^\d+$/.test(value)) return null;
-  const port = Number(value);
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
-}
-
-export function parseCdpPortConfig(content: string): number | null {
-  const lines = content.split(/\r?\n/).filter((line) => line.length > 0);
-  if (lines.length !== 1) return null;
-  const match = /^YODO_CDP_PORT=(\d+)$/.exec(lines[0] ?? "");
-  return parseCdpPort(match?.[1]);
-}
-
-export function configuredCdpPort(
-  envValue = process.env["YODO_CDP_PORT"],
-  configFile = SESSION_CONFIG_FILE,
-): number {
-  const fromEnv = parseCdpPort(envValue);
-  if (fromEnv !== null) return fromEnv;
-  try {
-    return parseCdpPortConfig(fs.readFileSync(configFile, "utf8")) ?? DEFAULT_CDP_PORT;
-  } catch {
-    return DEFAULT_CDP_PORT;
-  }
-}
-
-async function tryWs(port: number): Promise<string | undefined> {
-  if (!(await portLive(port))) return undefined;
-  try {
-    return await wsFromHttp(port);
-  } catch (error) {
-    if (error instanceof CdpError) throw error;
-    return undefined;
-  }
+  return body.webSocketDebuggerUrl || `ws://127.0.0.1:${active.port}${active.wsPath}`;
 }
 
 function spawnChrome(url?: string): void {
@@ -190,17 +181,17 @@ function openRemoteDebuggingPage(): void {
   spawnChrome(TOGGLE_PAGE_URL);
 }
 
-async function waitForWs(port: number): Promise<string | undefined> {
-  const deadline = Date.now() + PORT_WAIT_MS;
+async function waitForActivePort(filePath: string): Promise<ActivePort | null> {
+  const deadline = Date.now() + ACTIVE_PORT_WAIT_MS;
   while (Date.now() < deadline) {
-    const endpoint = await tryWs(port);
-    if (endpoint) return endpoint;
-    await sleep(PORT_RETRY_MS);
+    const active = readDevToolsActivePort(filePath);
+    if (active) return active;
+    await sleep(ACTIVE_PORT_RETRY_MS);
   }
-  return undefined;
+  return null;
 }
 
-/** 启动或激活 Chrome 后连接配置的 CDP port；失败时向用户询问实际 port。 */
+/** 启动或激活 Chrome，从 DevToolsActivePort 发现 browser WebSocket endpoint。 */
 export async function resolveWsEndpoint(): Promise<string> {
   if (!chromeInstalled()) throw new NeedInstallError();
 
@@ -212,16 +203,11 @@ export async function resolveWsEndpoint(): Promise<string> {
   }
 
   await sleep(CHROME_LAUNCH_MS);
-  try {
-    const endpoint = await waitForWs(configuredCdpPort());
-    if (endpoint) return endpoint;
-  } catch (error) {
-    if (error instanceof CdpError && error.code === "permission-blocked") {
-      throw new NeedAllowError();
-    }
-    throw error;
+  const activePortFile = path.join(chromeUserDataDir(), "DevToolsActivePort");
+  const active = await waitForActivePort(activePortFile);
+  if (!active) {
+    openRemoteDebuggingPage();
+    throw new NeedRemoteDebuggingError();
   }
-
-  openRemoteDebuggingPage();
-  throw new NeedCdpPortError();
+  return endpointFromActivePort(active);
 }

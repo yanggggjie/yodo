@@ -1,61 +1,99 @@
-# Chrome CDP port 配置计划
+# Chrome CDP connection 重构计划
 
 ## 1. 目标
 
-yodo 不读取 Chrome user data directory，不扫描 port，也不修改已安装源码。
+yodo 连接用户当前运行、保留登录状态的 Google Chrome。
 
-Connection 只使用一个明确 port：
+默认读取 Chrome 写入的 `DevToolsActivePort`，不再要求用户提供 port，也不依赖固定 `9222`。
 
-1. 优先读取 environment variable `YODO_CDP_PORT`。
-2. 否则读取 `~/.yodo/session/config.env` 中的 `YODO_CDP_PORT`。
-3. 没有配置时使用默认值 `9222`。
-4. 当前 port 无法连接时，打开 `chrome://inspect/#remote-debugging` 并让用户提供页面显示的 port。
-5. Agent 将 port 写入 `~/.yodo/session/config.env`，停止旧 holder，再重跑原命令。
+本次只重构 endpoint discovery 和错误分类：
 
-## 2. 配置文件
+- 不新增 dependency。
+- 不修改 Chrome profile。
+- 不关闭 Chrome 或用户已有 tab。
+- 不扩展到 Chrome Canary、Edge、Brave 等其它 browser。
 
-文件：
+## 2. 默认 connection 流程
 
-```text
-~/.yodo/session/config.env
-```
+1. 检查 Google Chrome 是否安装；未安装返回 `need-install`。
+2. 启动或激活 Google Chrome。
+3. 读取当前平台默认 Chrome user data directory 下的 `DevToolsActivePort`。
+4. 第一行解析 port，第二行解析 browser WebSocket path。
+5. 先请求 `http://127.0.0.1:<port>/json/version`：
+   - HTTP 200 且包含 `webSocketDebuggerUrl`：使用响应中的 endpoint。
+   - HTTP 404：使用 `DevToolsActivePort` 中的 port 和 path 拼出 endpoint。
+   - HTTP 403：返回 `need-allow`。
+6. 使用得到的 WebSocket endpoint 建立 CDP connection。
+7. WebSocket handshake 等待 Chrome 的 `Allow remote debugging?` popup，不因普通 timeout 自动建立第二条 connection。
 
-当前只支持：
+`DevToolsActivePort` 是默认 discovery source；`/json/version` 只用于优先取得实时 endpoint，不能因为它返回 404 就否定文件中的 WebSocket path。
 
-```dotenv
-YODO_CDP_PORT=54321
-```
+## 3. 文件位置
 
-约束：
+只支持 Google Chrome Stable：
 
-- 只接受十进制整数 `1–65535`。
-- Runtime 只读取 `YODO_CDP_PORT`，不把整个文件加载到 `process.env`。
-- 不支持 shell expansion、command substitution、`export`、多行值或其它 `.env` 语法。
-- Agent 写文件时使用 `0600`。
-- `process.env.YODO_CDP_PORT` 的优先级高于配置文件。
-- `session` 可重建；setup 清理后恢复默认 `9222`。
+- macOS：`~/Library/Application Support/Google/Chrome/DevToolsActivePort`
+- Windows：`%LOCALAPPDATA%/Google/Chrome/User Data/DevToolsActivePort`
+- Linux：`~/.config/google-chrome/DevToolsActivePort`
 
-## 3. Connection 流程
-
-1. 检查 Chrome 是否安装；未安装返回 `need-install`。
-2. 直接启动或激活 Chrome。
-3. 解析当前 CDP port。
-4. 在约 2 秒窗口内每 200ms 尝试当前 port。
-5. `/json/version` 返回有效 `webSocketDebuggerUrl` 时连接。
-6. HTTP 403 时返回 `need-allow`。
-7. 当前 port 始终不可用时，打开 remote debugging 页面并返回 `need-cdp-port`。
-
-不再尝试 `9223`、`9224`，也不读取 `SingletonLock`、`Local State` 或 `DevToolsActivePort`。
-
-## 4. Protocol
-
-新增：
+文件格式：
 
 ```text
-need-cdp-port
+<port>
+/devtools/browser/<id>
 ```
 
-提示包含当前尝试的 port，并要求用户回复页面显示的 port 数字。
+只做必要校验：
+
+- port 是 `1` 到 `65535` 的十进制整数。
+- path 非空且以 `/` 开头。
+
+## 4. 错误处理
+
+### Chrome 未运行
+
+启动或激活 Chrome，短暂等待 `DevToolsActivePort` 出现。Chrome 无法启动时返回 `need-chrome`。
+
+### 文件不存在
+
+打开 `chrome://inspect/#remote-debugging`，返回 `need-remote-debugging`，提示用户勾选 `Allow remote debugging for this browser instance`。
+
+### 文件无法读取
+
+遇到 `EACCES` 或 `EPERM` 时，返回专门的权限提示，不误报成 port 或 remote debugging 问题。提示用户：
+
+- yodo 需要读取 Chrome 的 `DevToolsActivePort`，以取得 remote debugging 的 WebSocket endpoint。
+- yodo 只读取该文件来建立 CDP connection，不修改 Chrome profile。
+- 请在系统设置中为当前运行 yodo 的宿主应用打开访问该目录所需的权限，然后重新运行原操作。
+- macOS 下给出 `System Settings > Privacy & Security` 的入口；具体应开启 `Files and Folders` 还是 `Full Disk Access`，以系统实际提供的选项为准。
+
+提示中包含无法读取的文件路径，但不输出文件内容。其它系统错误保留原始错误信息和文件路径。
+
+### 文件内容无效
+
+报告 `DevToolsActivePort` 内容无效；不猜 port 或 WebSocket path。
+
+### HTTP 404
+
+使用文件中的 WebSocket path，这是新版 Chrome 使用默认 user data directory 时的正常兼容路径。
+
+### HTTP 403 或 WebSocket 等待 approval
+
+返回 `need-allow`，提示用户点击当前 `Allow remote debugging?` popup。
+
+保持当前 WebSocket handshake；不要因 timeout 或重试创建新的 connection，避免连续产生 popup。
+
+### WebSocket connection 被拒绝或返回 404
+
+将 `DevToolsActivePort` 视为过期或对应 Chrome instance 已结束，重新读取一次文件；内容没有变化时停止并报告，不循环重试。
+
+## 5. 显式配置
+
+删除 `~/.yodo/session/config.env` 和 `YODO_CDP_PORT` 的默认流程。
+
+本次不新增 `YODO_CDP_WS` 等配置。yodo 当前只需要可靠连接本机 Google Chrome，额外配置等出现实际需求后再加。
+
+## 6. Protocol 与用户提示
 
 保留：
 
@@ -63,47 +101,52 @@ need-cdp-port
 - `need-chrome`
 - `need-allow`
 
-删除 `need-remote-debugging`：当前失败后的具体动作已经是提供实际 port，不再让用户只回复“已勾选”。
+恢复：
 
-## 5. Agent 行为
+- `need-remote-debugging`
+- `need-file-access`
 
-收到 `need-cdp-port` 后：
+删除：
 
-1. 将 `guide` 原样告诉用户。
-2. 等待用户提供 port。
-3. 只接受 `1–65535` 的十进制整数。
-4. 创建 `~/.yodo/session`。
-5. 将 `YODO_CDP_PORT=<port>` 写入 `~/.yodo/session/config.env`，mode 为 `0600`。
-6. 停止旧 holder。
-7. 重跑原命令。
+- `need-cdp-port`
 
-用户没有提供合法 port 时，不写配置。
+用户不再需要读取或回复 port。
 
-## 6. Runtime 修改
+## 7. Runtime 修改
 
-- `utils/constants.ts`：新增 `SESSION_CONFIG_FILE`。
-- `browser/connect.ts`：新增 port 解析与配置读取，只连接一个 port。
-- `protocol.ts`：加入 `need-cdp-port`，移除 `need-remote-debugging`。
-- 更新对应 self-check。
-- `SKILL.md`：加入 agent 写配置和重跑规则。
+- `browser/connect.ts`
+  - 恢复默认 Chrome user data directory 定位。
+  - 读取并解析 `DevToolsActivePort`。
+  - `/json/version` 返回 404 时使用文件中的 WebSocket path。
+  - 删除固定 port、配置文件和 port 询问逻辑。
+  - 区分文件不存在、读取失败、内容无效和 Chrome approval。
+- `protocol.ts`
+  - 恢复 `need-remote-debugging`。
+  - 删除 `need-cdp-port`。
+- `utils/constants.ts`
+  - 删除只为 `YODO_CDP_PORT` 增加的配置路径。
+- `connect.selfcheck.ts`、`protocol.selfcheck.ts`
+  - 更新对应检查。
+- `SKILL.md`
+  - 删除要求用户提供 port 和写入 `config.env` 的流程。
+  - 改为提示用户开启 remote debugging 或批准当前 connection。
 
-不新增 dependency。
+## 8. 最小检查
 
-## 7. 验证
+1. 正常解析 LF 和 CRLF 格式的 `DevToolsActivePort`。
+2. 非法 port、缺少 path 时失败。
+3. `/json/version` 成功时使用响应 endpoint。
+4. `/json/version` 返回 404 时使用文件 endpoint。
+5. HTTP 403 映射为 `need-allow`。
+6. 文件不存在映射为 `need-remote-debugging`。
+7. `EACCES`、`EPERM` 保留具体错误，不映射为 port 问题。
+8. WebSocket approval 等待期间不创建第二条 connection。
+9. 全部现有 self-check 通过。
 
-- 没有配置时使用 `9222`。
-- environment variable 覆盖配置文件。
-- 配置文件中的合法 port 生效。
-- 非数字、越界和复杂 `.env` 内容不生效并回退 `9222`。
-- 当前 port 成功时返回 endpoint。
-- HTTP 403 返回 `need-allow`。
-- 当前 port 失败时返回 `need-cdp-port` 并打开设置页面。
-- 全部现有检查通过。
+## 9. 完成条件
 
-## 8. 完成条件
-
-- Runtime 不读取 Chrome user data directory。
-- Port 可通过 `~/.yodo/session/config.env` 配置。
-- Agent 不修改 Runtime 源码。
-- 不扫描或结束任何 process。
-- 用户提供新 port 后可以重启 holder 并重连。
+- 开启 Chrome remote debugging 后，yodo 不需要用户提供 port 即可连接。
+- Chrome `/json/version` 返回 404 时，仍能通过 `DevToolsActivePort` 连接。
+- Chrome 要求 approval 时，只保留一条等待中的 connection。
+- 错误提示能区分 remote debugging 未开启、Chrome approval 和文件读取失败。
+- 不新增 dependency，不增加与当前目标无关的 browser support。
