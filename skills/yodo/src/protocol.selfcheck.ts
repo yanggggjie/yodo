@@ -14,8 +14,8 @@ assert.equal(
   "need-allow",
 );
 assert.equal(
-  handshakeStatusFromMark(`x ${HANDSHAKE_MARKS["need-remote-debugging"]}`),
-  "need-remote-debugging",
+  handshakeStatusFromMark(`x ${HANDSHAKE_MARKS["need-cdp-port"]}`),
+  "need-cdp-port",
 );
 assert.equal(handshakeStatusFromMark("Error: raw CDP WebSocket open failed"), null);
 
@@ -23,6 +23,12 @@ class NeedInstallError extends Error {
   constructor() {
     super("x");
     this.name = "NeedInstallError";
+  }
+}
+class NeedCdpPortError extends Error {
+  constructor() {
+    super("x");
+    this.name = "NeedCdpPortError";
   }
 }
 class CdpError extends Error {
@@ -35,14 +41,7 @@ class CdpError extends Error {
 }
 
 assert.equal(handshakeStatusFromError(new NeedInstallError()), "need-install");
-assert.equal(
-  handshakeStatusFromError(new CdpError("chrome-not-running")),
-  "need-chrome",
-);
-assert.equal(
-  handshakeStatusFromError(new CdpError("cdp-port-missing")),
-  "need-remote-debugging",
-);
+assert.equal(handshakeStatusFromError(new NeedCdpPortError()), "need-cdp-port");
 assert.equal(
   handshakeStatusFromError(new CdpError("permission-blocked")),
   "need-allow",

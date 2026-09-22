@@ -16,6 +16,7 @@ export const SESSION_SOCK = SESSION_SOCK_IS_FILE
   : `\\\\.\\pipe\\yodo-${createHash("sha256").update(os.homedir()).digest("hex").slice(0, 12)}`;
 export const SESSION_PID_FILE = path.join(SESSION_DIR, "pid");
 export const SESSION_LOG = path.join(SESSION_DIR, "log.jsonl");
+export const SESSION_CONFIG_FILE = path.join(SESSION_DIR, "config.env");
 
 /** attach / idle 时的短 CDP 超时。与「最多 5 次」无关。 */
 export const CDP_SHORT_TIMEOUT_MS = 2_000;

@@ -100,7 +100,8 @@ flowchart TD
 
 | stdout | 处理 |
 |---|---|
-| `need-install` / `need-chrome` / `need-remote-debugging` / `need-allow` | 将 `guide` 原样告诉用户，等待“好了”，随后重跑同一命令；不轮询、不改写 `guide`。 |
+| `need-install` / `need-chrome` / `need-allow` | 将 `guide` 原样告诉用户，等待“好了”，随后重跑同一命令；不轮询、不改写 `guide`。 |
+| `need-cdp-port` | 将 `guide` 原样告诉用户并等待 port。只接受 `1` 到 `65535` 的十进制整数；收到后将 `YODO_CDP_PORT=<port>` 写入 `~/.yodo/session/config.env`，文件 mode 为 `0600`，停止旧 holder，再重跑同一命令。不得修改 Runtime 源码；用户未提供合法 port 时不写配置。 |
 | 只有 `error`，没有 `status` | 命令未正常启动；停止并说明错误。 |
 | `status: success` | 使用 `result`；有 `resultFile` 时先读取文件。 |
 | `status: failure` | 按 `capability` 或 `candidate` 的规则处理。 |
