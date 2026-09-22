@@ -81,6 +81,10 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 > - **yodo 更适合普通网站**。抖音、小红书等风控网站会 fallback 到 DOM 操作运行较慢；
 > - 请勿批量使用，以免影响网站运行或账号安全。
 
+### 2.2 查看更新
+
+查看 [更新记录](skills/yodo/update.md)。
+
 ## 3. 使用
 
 ### 3.1 直接布置任务

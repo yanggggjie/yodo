@@ -8,7 +8,7 @@
   "scripts": {
     "check": "npm --prefix skills/yodo/src run check",
     "test": "npm --prefix skills/yodo/src run test",
-    "dev:install": "npx -y skills add . -s yodo -g -a '*' -y && node skills/yodo/setup.js",
+    "dev:install": "npx -y skills add . -s yodo -g -a '*' -y",
     "verify:pack": "node scripts/verify-pack.mjs"
   },
   "engines": {

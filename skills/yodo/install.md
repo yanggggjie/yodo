@@ -1,34 +1,49 @@
 # 安装与更新 yodo
 
-安装和更新使用同一套流程：同步 GitHub 默认分支 `main` 上的 yodo skill，检查本机环境，运行 `setup.js`，最后验收 `~/.yodo`。
+安装和更新使用同一套流程。在线安装从 GitHub 默认分支 `main` 获取 skill；本地开发安装从当前 repository 获取 skill。除此之外，环境检查、数据处理、`setup.js` 和验收完全相同。
 
-更新现有安装前先阅读 [更新说明](./update.md)，尤其是 `~/.yodo/task/*.js` 的迁移要求。
+- `~/.yodo` 不存在时，按首次安装处理，不执行历史迁移。
+- `~/.yodo` 已存在时，先阅读 [更新说明](./update.md)，检查并备份受影响的数据，再安装和迁移。
 
 ```mermaid
 flowchart TD
-  A[同步 yodo skill] --> B{环境是否满足要求}
-  B -->|Chrome 已安装且 Node ≥24| C[运行 setup.js]
-  B -->|缺少 Chrome| D[请用户安装 Chrome]
-  B -->|Node 缺失或版本过低| E[安装或升级 Node]
-  D --> B
-  E --> B
-  C --> F{目录与依赖是否完整}
-  F -->|是| G[安装或更新完成]
-  F -->|否| H[运行 doctor 定位问题]
-  H --> C
+  A[选择 skill 来源] --> B{~/.yodo 是否存在}
+  B -->|否| C[首次安装]
+  B -->|是| D[读取 update.md 并备份受影响数据]
+  C --> E[同步 yodo skill]
+  D --> E
+  E --> F{环境是否满足要求}
+  F -->|Chrome 已安装且 Node ≥24| G[从安装目录运行 setup.js]
+  F -->|缺少 Chrome| H[请用户安装 Chrome]
+  F -->|Node 缺失或版本过低| I[安装或升级 Node]
+  H --> F
+  I --> F
+  G --> J[迁移并验证受影响的 task]
+  J --> K{doctor 是否通过}
+  K -->|是| L[报告更新内容和结果]
+  K -->|否| M[定位并处理问题]
+  M --> K
 ```
 
-流程从同步 yodo skill 开始。环境检查通过后运行 `setup.js`；缺少 Chrome 或 Node 不符合要求时，先完成对应安装或升级，再重新检查。部署后验收目录与依赖；如不完整，运行 doctor 定位问题并重新部署。
+先从当前来源读取本文件。更新已有安装时，同时读取同一来源的 `update.md` 并备份受影响的数据。同步 skill 后，从实际安装目录运行 `setup.js`，根据最新版要求迁移已有数据，再运行 doctor 验收并向用户报告。
 
 ## 1. 同步 yodo skill
 
-### 1.1 安装或更新
+### 1.1 选择来源并同步
 
-安装和更新都运行：
+在线安装或更新使用：
 
 ```bash
 npx skills add yanggggjie/yodo -g -y -a '*' -s yodo
 ```
+
+本地开发安装或更新，在 repository 根目录使用：
+
+```bash
+npm run dev:install
+```
+
+它等价于从当前 repository absolute path 执行 `skills add`。除 skill 来源外，后续流程与在线安装相同。
 
 完成后检查全局 skill：
 
@@ -36,7 +51,7 @@ npx skills add yanggggjie/yodo -g -y -a '*' -s yodo
 npx skills ls -g
 ```
 
-确认列表中存在 `yodo`，并找到本次安装后的 yodo skill 目录。后续必须从这个目录运行 `setup.js`，确保 agent 读取的 skill 与部署到 `~/.yodo/src` 的运行时来自同一版本。
+确认列表中存在 `yodo`，并找到本次安装后的 yodo skill 目录。后续必须从这个实际安装目录运行 `setup.js`，确保 agent 读取的 skill 与部署到 `~/.yodo/src` 的运行时来自同一版本；本地安装也不得直接运行 repository 中的 `skills/yodo/setup.js`。
 
 ## 2. 检查运行环境
 
@@ -89,7 +104,7 @@ setup 不会在 `~/.yodo/src` 中写 `task`，也不会在完成后重新启动 
 | 路径 | setup 的处理 |
 |---|---|
 | `~/.yodo/src` | 清空后部署当前版本的运行时，并重新安装依赖 |
-| `~/.yodo/task` | 保留 capability；更新前按 `update.md` 迁移 task，刷新 `lib/` 和 package 元数据 |
+| `~/.yodo/task` | 保留 capability；更新时按 `update.md` 备份、迁移并验证，刷新 `lib/` 和 package 元数据 |
 | `~/.yodo/temp` | 不保证兼容，不纳入更新迁移 |
 | `~/.yodo/record` | 原样保留，不修改已有 record |
 | `~/.yodo/session` | 停止旧 holder并按新版本重建运行状态 |
@@ -142,7 +157,7 @@ node ~/.yodo/src/bin/init.js
 - [ ] `~/.yodo/src` 来自本次安装的 skill，且依赖 marker 存在。
 - [ ] `~/.yodo/src`、`~/.yodo/task`、`~/.yodo/temp`、`~/.yodo/record`、`~/.yodo/session` 全部存在。
 - [ ] `~/.yodo/task/lib/index.js` 存在。
-- [ ] 已按 `update.md` 检查并迁移现有 `~/.yodo/task/*.js`。
+- [ ] 首次安装未执行历史迁移；更新已有安装时，已按 `update.md` 检查、迁移并验证现有数据。
 - [ ] 更新没有修改或删除已有 `record`。
 
 ## 5. 诊断异常
