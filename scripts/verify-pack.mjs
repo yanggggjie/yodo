@@ -47,7 +47,6 @@ try {
   for (const rel of [
     "SKILL.md",
     "LICENSE",
-    "update.md",
     "setup.js",
     "src/sdk.ts",
     "src/holder.ts",
