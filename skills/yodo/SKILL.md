@@ -34,32 +34,43 @@ yodo 将 `user goal` 拆成一个或多个 `task`。每个 `task` 是可独立�
 
 ### 1.2 总体流程
 
+“我教你”只让 `recording` 提前发生。取得具体 `user goal` 后，两种入口使用同一套拆分、匹配、学习和运行流程。
+
 ```mermaid
 flowchart TD
-  A[拆分 user goal] --> B{每个 task 都有匹配 capability?}
-  B -->|是| C{capability 能直接完成?}
-  C -->|是| J[按原始顺序运行 capability]
-  C -->|同一流程但需修改| U[复制到 temp 作为 candidate]
-  C -->|超出原流程范围| D
-  B -->|否| D[一次 recording 覆盖全部未匹配 task]
-  U --> V{现有依据足够?}
-  V -->|是| E
-  V -->|否| D
-  D --> E[逐个处理未匹配 task]
-  E --> N[只读 network material 并写 candidate]
-  N -->|2 次内 success| P[移入 ~/.yodo/task]
-  N -->|第 2 次 failure| M[允许读取 DOM/DOMTimeline.jsonl]
-  M --> T[把同一 candidate 改用 DOM implementation]
-  T -->|success| P
-  T -->|无依据继续| X[说明当前无法学会]
-  P -->|还有 task| E
-  P -->|全部完成| Q{能可靠生成核对 URL?}
-  J -->|全部完成| Q
-  Q -->|是| L[报告结果和页面 URL]
-  Q -->|否| R[报告 user goal 结果]
-  J -->|failure 且可能已有副作用| X
-  J -->|failure 且可安全修改| U
+  S{用户明确说“我教你”?}
+  S -->|否| A[取得具体 user goal]
+  S -->|是| T[直接开始 recording]
+  T --> U[用户完成演示]
+  U --> V[停止 recording]
+  V --> W[取得具体 user goal 和教学 record]
+  W --> A
+  A --> B[拆分 user goal]
+  B --> C[匹配 capability]
+  C --> D{所有 task 可直接运行?}
+  D -->|是| E[按原始顺序运行 capability]
+  D -->|否| M{现有材料足够学习或修改?}
+  M -->|是| I[逐个学习或修改 task]
+  M -->|否| F{已有本次教学 record?}
+  F -->|否| G[开始一次 recording 覆盖所需操作]
+  G --> H[取得 record]
+  F -->|是| H
+  H --> I[逐个学习或修改 task]
+  I --> N[读取 network material 并运行 network candidate]
+  N -->|success| J[保存 capability]
+  N -->|第 1 次 failure 且有新依据| O[修改并再次运行]
+  O -->|success| J
+  O -->|第 2 次 failure| P[读取 DOM material]
+  P --> Q[把同一 candidate 改为 DOM implementation]
+  Q -->|success| J
+  Q -->|无依据继续| X[说明当前无法稳定学会]
+  J -->|还有 task| I
+  J -->|全部完成| K[按原始顺序运行全部 task]
+  E --> L[报告 user goal 结果和可核对 URL]
+  K --> L
 ```
+
+图中省略的副作用判断、材料读取限制和正式参数验证，以后续章节为准。
 
 ## 2. 完成条件与边界
 
@@ -113,12 +124,16 @@ flowchart TD
 
 ### 4.1 拆分 `user goal`
 
+- “我教你”入口在用户说明要学习的具体操作前，不拆分 `user goal`，也不把网站、产品或演示范围当作 `task`。
+- 用户完成演示并说明具体操作后，将该具体操作作为新的 `user goal`，再按本节规则拆分。
 - 中间需要模型读取自然语言、挑选、判断、改写或决定下一步时必须拆开。
 - 连续的纯代码动作保持一份，例如 `goto` 后发请求，或用已有 id 拼下一条 URL。
 - 同一 `capability` 以不同参数出现多次时，运行同一个 `task` 多次。
 - 前一个 `task` 的 `result` 由模型处理后，作为后一个 `task` 的 argv。
 
 ### 4.2 匹配并决定处理方式
+
+“我教你”入口开始 `recording` 前不读取、搜索或匹配 `capability`。用户完成演示并说明具体操作后，才执行以下匹配；已有 `capability` 能直接完成时继续复用，不因本次 `recording` 重复学习。
 
 1. 只搜索 `~/.yodo/task/*.js`。
 2. 读取 `@summary`、`@executor`、argv 说明和必要的顶部固定常量；不读取 `~/.yodo/temp`。
@@ -127,7 +142,7 @@ flowchart TD
    - 只需传入不同 argv：直接运行，不修改。
    - 流程范围相同，但 endpoint、固定字段、selector、验证逻辑或其它实现细节需要调整：按“修改 capability”处理。
    - 当前目标超出原流程范围：视为没有匹配 `capability`，生成新的 `task`，不得扩大原 `capability`。
-5. 只要有一个 `task` 没有匹配 `capability`，就先开始一次 `recording`，覆盖所有未匹配操作，不先运行已有部分。
+5. 只要有一个 `task` 没有匹配 `capability`，就先开始一次 `recording`，覆盖所有未匹配操作，不先运行已有部分。“我教你”入口已经取得本次 `record` 时，不再开始第二次 `recording`，直接将该 `record` 用于未匹配 `task`。
 
 ### 4.3 回答能力查询
 
@@ -169,7 +184,35 @@ node ~/.yodo/task/<name>.js <参数>
 
 ## 6. Recording
 
-### 6.1 开始并等待演示
+### 6.1 “我教你”入口
+
+用户明确表达自己要教 yodo 时，直接开始一次 `recording`：
+
+1. 不拆分 `user goal`，不读取或匹配 `~/.yodo/task/*.js`，也不读取 `~/.yodo/temp`。
+2. “我教你”之后的网站、产品或范围只用于生成简短 label 和向用户复述演示范围，不作为 `task`；无法确定 label 时使用通用 label。
+3. 运行 `record-start.js`。
+4. 请用户只在标题为 `yodo record` 的窗口中完整演示，并在结束时回复 `好了，学习<具体操作>`；取消时回复“取消”。
+5. 此时不提供缺失操作清单，因为具体 `task` 尚未确定。
+
+只在用户明确表达自己要教 yodo 时触发，例如“yodo 我教你用苹果官网”或“yodo 我来教你怎么查看订单”。“yodo 教我怎么查看订单”、普通请求中偶然出现“教”字或询问 yodo 如何学习时，不触发。
+
+用户回复 `好了，学习<具体操作>` 或其它等价表达时：
+
+1. 运行 `record-stop.js`。
+2. 将用户说明的具体操作作为新的 `user goal`。
+3. 按正常规则拆分 `task` 并匹配 `capability`。
+4. 已有 `capability` 能直接完成的 `task` 继续复用；未匹配的 `task` 使用刚停止的 `record`，按现有 network、DOM 和验证规则学习。
+
+用户只回复“好了”时：
+
+1. 运行 `record-stop.js` 并保留返回的 record name。
+2. 请用户说明要从本次演示中学习的具体操作。
+3. 收到具体操作前，不读取 `record material`，不创建 `candidate`。
+4. 用户随后说明具体操作时，将其作为新的 `user goal`，再拆分和匹配。
+
+第一版只在当前 conversation 中继续使用最近一次尚未处理的 `record`，不创建跨 conversation 状态文件，也不管理多个待处理 `record`。用户回复“取消”时运行 `record-abort.js`，不创建 `task` 或 `candidate`。
+
+### 6.2 开始并等待演示
 
 ```bash
 node ~/.yodo/src/bin/record-start.js [label]
@@ -177,7 +220,7 @@ node ~/.yodo/src/bin/record-start.js [label]
 
 label 只用于可读前缀，程序会追加 6 位随机后缀生成唯一 name。`status: recording` 返回最终 name。请用户只在标题为 `yodo record` 的窗口中演示本轮所有缺失操作，完成后回复“好了”；给出自然操作清单，不说明内部拆分。
 
-### 6.2 结束或取消
+### 6.3 结束或取消
 
 用户回复后运行：
 
@@ -195,7 +238,7 @@ node ~/.yodo/src/bin/record-stop.js
 node ~/.yodo/src/bin/record-abort.js
 ```
 
-### 6.3 读取 `record`
+### 6.4 读取 `record`
 
 一个 `record` 包含：
 
