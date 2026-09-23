@@ -70,7 +70,7 @@ shell 次数表示 Claude Code 发起了多少次工具调用。思考时间是 
 把下面整段复制给你的 agent：
 
 ```text
-请安装或更新 yodo。读取并严格执行这份说明：
+请安装并更新 yodo。读取并严格执行这份说明：
 https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 ```
 
