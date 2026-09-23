@@ -19,20 +19,7 @@
 
 ### 2.1 本地安装
 
-用户要求“本地安装”“从本地安装”“本地更新”或同义操作时，必须完整执行 `skills/yodo/install.md`。
-
-本地与在线安装或更新的唯一区别是 skill 来源：
-
-- 本地使用当前 repository。
-- 在线使用 GitHub 默认分支 `main`。
-
-本地同步 skill 时运行：
-
-```bash
-npm run dev:install
-```
-
-除上述 source 和同步 command 外，不在本文件重复安装、迁移或验收规则。安装、迁移和验收以 `skills/yodo/install.md` 为准。用户能感知的变化写在 README「更新记录」。
+用户要求“本地安装”“从本地安装”“本地更新”或同义操作时，完整执行 `skills/yodo/install.md`。不在本文件重复安装、迁移或验收步骤。
 
 ### 2.2 检查与测试
 
@@ -69,7 +56,7 @@ skills/yodo/
 
 ### 3.2 发布规则
 
-- **安装**：对外命令为 `npx skills add yanggggjie/yodo`，来源是 GitHub 默认分支 `main`。
+- **安装**：对外安装与更新以 `skills/yodo/install.md` 为准。
 - **开发**：可以在任意 branch 开发，不要求同步维护发布文档。
 - **发布**：不发布 npm 包，不创建 GitHub Release。release commit 进入 `main` 即完成发布。
 - **回溯**：需要可回溯版本时创建 `vX.Y.Z` tag。
