@@ -1,2 +1,2 @@
-import { yodo } from "../sdk.ts";
-await yodo.record.abort();
+import { control } from "../control.ts";
+await control.record.abort();

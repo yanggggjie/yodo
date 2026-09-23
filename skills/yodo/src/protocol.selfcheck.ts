@@ -25,6 +25,18 @@ class NeedInstallError extends Error {
     this.name = "NeedInstallError";
   }
 }
+class NeedRemoteDebuggingError extends Error {
+  constructor() {
+    super("x");
+    this.name = "NeedRemoteDebuggingError";
+  }
+}
+class NeedFileAccessError extends Error {
+  constructor() {
+    super("x");
+    this.name = "NeedFileAccessError";
+  }
+}
 class CdpError extends Error {
   readonly code: string;
   constructor(code: string) {
@@ -35,14 +47,8 @@ class CdpError extends Error {
 }
 
 assert.equal(handshakeStatusFromError(new NeedInstallError()), "need-install");
-assert.equal(
-  handshakeStatusFromError(new CdpError("chrome-not-running")),
-  "need-chrome",
-);
-assert.equal(
-  handshakeStatusFromError(new CdpError("cdp-port-missing")),
-  "need-remote-debugging",
-);
+assert.equal(handshakeStatusFromError(new NeedRemoteDebuggingError()), "need-remote-debugging");
+assert.equal(handshakeStatusFromError(new NeedFileAccessError()), "need-file-access");
 assert.equal(
   handshakeStatusFromError(new CdpError("permission-blocked")),
   "need-allow",

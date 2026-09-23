@@ -1,290 +1,136 @@
-/**
- * yodo SDK —— 对外唯一的面。bin/*.js 和 task 都是它的薄组合。
- * 没有 CLI / verb dispatcher。task 在 client 进程里跑，浏览器操作经 holder 代理。
- */
 import * as net from "node:net";
+import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js";
 import { SESSION_SOCK } from "./utils/constants.ts";
-import type { SessionRequest, SessionResponse } from "./protocol.ts";
-import { ensureHolder, ensureSessionAndRpc, stopCurrentHolder } from "./cli/spawn.ts";
-import { ensureHomeLayout } from "./store/layout.ts";
+import type { CdpScope, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RpcMessage, RpcMethod } from "./protocol.ts";
+import { ensureHolder } from "./cli/spawn.ts";
 import { captureConsole, runFailureJson, runSuccessJson } from "./run-report.ts";
-import { handleDoctor } from "./cli/doctor.ts";
-import { CLI_RPC_BUFFER_MS, RECORD_STOP_RPC_MS } from "./utils/constants.ts";
 
-// ───────── Node 版本门 ─────────
-function assertNode24(): void {
-  const major = Number(process.versions.node.split(".")[0]);
-  if (!Number.isFinite(major) || major < 24) {
-    console.error(`yodo 需要 Node >=24，当前 ${process.version}。升级 Node 后重试。`);
-    process.exit(1);
-  }
+type Listener<E extends keyof ProtocolMapping.Events> = (...params: ProtocolMapping.Events[E]) => void;
+type Subscription = { listener: (...params: never[]) => void; scope: CdpScope; event: string };
+
+class RpcError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+  constructor(code: number, message: string, data?: unknown) { super(message); this.name = "RpcError"; this.code = code; this.data = data; }
 }
 
-class HandshakeError extends Error {
-  readonly status: string;
-  readonly guide: string;
-  constructor(status: string, guide: string) {
-    super(guide);
-    this.name = "HandshakeError";
-    this.status = status;
-    this.guide = guide;
-  }
-}
-
-function printHandshake(status: string, guide?: string): void {
-  console.log(JSON.stringify({ status, guide }, null, 2));
-}
-
-// ───────── 持久连接（一条连接跑完一个 holder run 的多个 op）─────────
-class HolderConn {
+class RpcPeer {
+  private buffer = "";
+  private closed = false;
+  private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private subscriptions = new Map<string, Subscription>();
   private socket: net.Socket;
-  private buf = "";
-  private pending = new Map<string, { resolve: (r: SessionResponse) => void; reject: (e: Error) => void }>();
-
   private constructor(socket: net.Socket) {
     this.socket = socket;
     socket.on("data", (chunk) => this.onData(chunk));
     socket.on("close", () => this.rejectAll(new Error("holder 连接已关闭")));
-    socket.on("error", (e) => this.rejectAll(e));
+    socket.on("error", (error) => this.rejectAll(error));
   }
-
-  static open(): Promise<HolderConn> {
+  static open(): Promise<RpcPeer> {
     return new Promise((resolve, reject) => {
       const socket = net.connect({ path: SESSION_SOCK });
-      socket.once("connect", () => resolve(new HolderConn(socket)));
+      socket.once("connect", () => resolve(new RpcPeer(socket)));
       socket.once("error", reject);
     });
   }
-
   private onData(chunk: Buffer): void {
-    this.buf += chunk.toString();
+    this.buffer += chunk.toString();
     let nl: number;
-    while ((nl = this.buf.indexOf("\n")) >= 0) {
-      const line = this.buf.slice(0, nl);
-      this.buf = this.buf.slice(nl + 1);
+    while ((nl = this.buffer.indexOf("\n")) >= 0) {
+      const line = this.buffer.slice(0, nl); this.buffer = this.buffer.slice(nl + 1);
       if (!line.trim()) continue;
-      let res: SessionResponse;
-      try {
-        res = JSON.parse(line) as SessionResponse;
-      } catch {
+      let message: RpcMessage;
+      try { message = JSON.parse(line) as RpcMessage; } catch { this.close(new Error("holder 返回无效 JSON")); return; }
+      if ("id" in message) {
+        const pending = this.pending.get(message.id);
+        if (!pending) continue;
+        this.pending.delete(message.id);
+        if ("error" in message) pending.reject(new RpcError(message.error.code, message.error.message, message.error.data));
+        else pending.resolve(message.result);
         continue;
       }
-      const p = this.pending.get(res.id);
-      if (p) {
-        this.pending.delete(res.id);
-        p.resolve(res);
-      }
+      const notification = message as JsonRpcNotification;
+      const sub = this.subscriptions.get(notification.params.subscriptionId);
+      if (!sub) continue;
+      try { sub.listener(notification.params.value as never); } catch (error) { queueMicrotask(() => { throw error; }); }
     }
   }
-
-  private rejectAll(err: Error): void {
-    for (const p of this.pending.values()) p.reject(err);
-    this.pending.clear();
-  }
-
-  send(op: SessionRequest["op"], params: Omit<SessionRequest, "id" | "op"> = {}): Promise<SessionResponse> {
+  request(method: RpcMethod, params?: Record<string, unknown>): Promise<unknown> {
+    if (this.closed) return Promise.reject(new Error("holder 连接已关闭"));
     const id = crypto.randomUUID();
-    return new Promise<SessionResponse>((resolve, reject) => {
+    const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, ...(params ? { params } : {}) };
+    return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.socket.write(`${JSON.stringify({ id, op, ...params })}\n`);
-    }).then((res) => {
-      if (res.ok) return res;
-      if (res.status) throw new HandshakeError(res.status, res.guide ?? "");
-      throw new Error(res.error ?? `${op} 失败`);
+      this.socket.write(`${JSON.stringify(request)}\n`);
     });
   }
-
-  close(): void {
-    this.socket.end();
-  }
+  addSubscription(id: string, subscription: Subscription): void { this.subscriptions.set(id, subscription); }
+  deleteSubscription(id: string): void { this.subscriptions.delete(id); }
+  private rejectAll(error: Error): void { for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); this.subscriptions.clear(); }
+  close(error = new Error("holder 连接已关闭")): void { if (this.closed) return; this.closed = true; this.rejectAll(error); this.socket.end(); }
 }
 
-// ───────── client 侧代理对象 ─────────
-type EvaluateArg = string | ((...args: any[]) => unknown);
-
-function buildExpr(fnOrStr: EvaluateArg, args: unknown[]): string {
-  if (typeof fnOrStr === "function") {
-    const serialized = args.map((a) => JSON.stringify(a)).join(", ");
-    return `(async () => (${fnOrStr.toString()})(${serialized}))()`;
-  }
-  return fnOrStr;
+export interface CdpSession {
+  send<M extends keyof ProtocolMapping.Commands>(method: M, ...params: ProtocolMapping.Commands[M]["paramsType"]): Promise<ProtocolMapping.Commands[M]["returnType"]>;
+  on<E extends keyof ProtocolMapping.Events>(event: E, listener: Listener<E>): Promise<() => Promise<void>>;
+  once<E extends keyof ProtocolMapping.Events>(event: E, options?: { timeout?: number }): Promise<ProtocolMapping.Events[E][0]>;
 }
 
-export class ProxyPage {
-  private conn: HolderConn;
-  readonly targetId: string;
-  private currentUrl: string;
-  constructor(conn: HolderConn, targetId: string, currentUrl: string) {
-    this.conn = conn;
-    this.targetId = targetId;
-    this.currentUrl = currentUrl;
-  }
-
-  url(): string {
-    return this.currentUrl;
-  }
-
-  async goto(url: string, options?: { timeout?: number }): Promise<void> {
-    await this.conn.send("page.goto", { pageId: this.targetId, url, timeoutMs: options?.timeout });
-    this.currentUrl = url;
-  }
-
-  async evaluate<T = unknown>(fnOrStr: EvaluateArg, ...args: unknown[]): Promise<T> {
-    const res = await this.conn.send("page.evaluate", {
-      pageId: this.targetId,
-      expr: buildExpr(fnOrStr, args),
-    });
-    return res.value as T;
-  }
-
-  readonly dom = {
-    click: async (selector: string): Promise<void> => {
-      await this.conn.send("page.dom-click", { pageId: this.targetId, selector });
+function cdpSession(peer: RpcPeer, scope: CdpScope): CdpSession {
+  return {
+    async send(method, ...params) { return await peer.request("cdp.send", { scope, method, params: params[0] ?? {} }) as never; },
+    async on(event, listener) {
+      const subscriptionId = crypto.randomUUID();
+      peer.addSubscription(subscriptionId, { scope, event, listener: listener as (...params: never[]) => void });
+      try { await peer.request("cdp.subscribe", { subscriptionId, scope, event }); }
+      catch (error) { peer.deleteSubscription(subscriptionId); throw error; }
+      let active = true;
+      return async () => { if (!active) return; active = false; peer.deleteSubscription(subscriptionId); await peer.request("cdp.unsubscribe", { subscriptionId }); };
     },
-    fill: async (selector: string, value: string): Promise<void> => {
-      await this.conn.send("page.dom-fill", { pageId: this.targetId, selector, value });
-    },
-    press: async (selector: string, key: string): Promise<void> => {
-      await this.conn.send("page.dom-press", { pageId: this.targetId, selector, key });
-    },
-    scroll: async (selector: string | undefined, options: { deltaX?: number; deltaY?: number }): Promise<void> => {
-      await this.conn.send("page.dom-scroll", { pageId: this.targetId, selector, deltaX: options.deltaX, deltaY: options.deltaY });
-    },
-    check: async (selector: string, checked: boolean): Promise<void> => {
-      await this.conn.send("page.dom-check", { pageId: this.targetId, selector, checked });
-    },
-    select: async (selector: string, value: string): Promise<void> => {
-      await this.conn.send("page.dom-select", { pageId: this.targetId, selector, value });
-    },
-    wait: async (selector: string, options?: { timeout?: number }): Promise<void> => {
-      await this.conn.send("page.dom-wait", { pageId: this.targetId, selector, timeoutMs: options?.timeout });
+    async once(event, options) {
+      return await new Promise(async (resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const subscriptionId = crypto.randomUUID();
+        let settled = false;
+        const unsubscribe = async (): Promise<void> => { peer.deleteSubscription(subscriptionId); await peer.request("cdp.unsubscribe", { subscriptionId }); };
+        peer.addSubscription(subscriptionId, { scope, event, listener: ((value: ProtocolMapping.Events[typeof event][0]) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); void unsubscribe().then(() => resolve(value), reject); }) as (...params: never[]) => void });
+        try { await peer.request("cdp.subscribe", { subscriptionId, scope, event }); }
+        catch (error) { peer.deleteSubscription(subscriptionId); reject(error); return; }
+        if (options?.timeout != null) timer = setTimeout(() => { if (settled) return; settled = true; void unsubscribe().then(() => reject(new Error(`${String(event)} timeout ${options.timeout}ms`)), reject); }, options.timeout);
+      });
     },
   };
-
-  async title(): Promise<string> {
-    return (await this.conn.send("page.title", { pageId: this.targetId })).title ?? "";
-  }
-
-  async close(): Promise<void> {
-    await this.conn.send("page.close", { pageId: this.targetId });
-  }
-
-  async bringToFront(): Promise<void> {
-    await this.conn.send("page.bring-to-front", { pageId: this.targetId });
-  }
 }
 
-export class ProxyContext {
-  private conn: HolderConn;
-  constructor(conn: HolderConn) {
-    this.conn = conn;
-  }
+export type PageHandle = { readonly _targetId: string; readonly cdp: CdpSession };
+export type TaskFn = (api: { page: PageHandle; _cdp: { connection: CdpSession; browser: CdpSession } }) => Promise<unknown> | unknown;
 
-  async newPage(): Promise<ProxyPage> {
-    const r = await this.conn.send("context.new-page", {});
-    return new ProxyPage(this.conn, r.pageId!, r.url ?? "about:blank");
-  }
-}
-
-export type TaskFn = (api: { browserContext: ProxyContext; args?: unknown }) => Promise<unknown> | unknown;
-
-// ───────── 公开 SDK ─────────
-async function ensureOrHandshake(): Promise<boolean> {
-  const blocked = await ensureHolder();
-  if (blocked?.status) {
-    printHandshake(blocked.status, blocked.guide);
-    return false;
-  }
-  return true;
-}
+function assertNode24(): void { const major = Number(process.versions.node.split(".")[0]); if (!Number.isFinite(major) || major < 24) throw new Error(`yodo 需要 Node >=24，当前 ${process.version}`); }
 
 export const yodo = {
-  /** 确保 holder 起来并连上 Chrome（点一次授权后保持）。 */
-  async start(): Promise<void> {
-    assertNode24();
-    if (await ensureOrHandshake()) console.log(JSON.stringify({ status: "ok" }));
-  },
-
-  /** 停 holder（连接断 → 授权失效）。 */
-  async stop(): Promise<void> {
-    assertNode24();
-    await stopCurrentHolder();
-    console.log(JSON.stringify({ status: "ok" }));
-  },
-
-  /** 建 `.yodo/` 数据目录。 */
-  async init(): Promise<void> {
-    assertNode24();
-    ensureHomeLayout();
-    console.log("yodo init ok");
-  },
-
-  /** 排障。 */
-  async doctor(): Promise<void> {
-    assertNode24();
-    handleDoctor();
-  },
-
-  /** 跑一个 task 闭包：闭包在本进程执行，浏览器操作经 holder。result 直出 stdout。 */
-  async run(fn: TaskFn, opts: { args?: unknown } = {}): Promise<void> {
-    assertNode24();
+  async run(fn: TaskFn): Promise<void> {
     const scriptAbs = process.argv[1] ?? "task";
-    if (!(await ensureOrHandshake())) return;
-
-    const conn = await HolderConn.open();
-    const logs: string[] = [];
-    const restore = captureConsole(logs);
+    let restore: (() => void) | undefined;
+    let peer: RpcPeer | undefined;
     try {
-      await conn.send("run.begin");
-      const browserContext = new ProxyContext(conn);
-      const result = await fn({ browserContext, args: opts.args });
-      restore();
+      assertNode24();
+      const blocked = await ensureHolder();
+      if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(JSON.stringify({ status, guide: blocked.message }, null, 2)); return; }
+      peer = await RpcPeer.open();
+      const begun = await peer.request("run.begin") as { pageId: string };
+      const page: PageHandle = { _targetId: begun.pageId, cdp: cdpSession(peer, { type: "page", pageId: begun.pageId }) };
+      const logs: string[] = []; restore = captureConsole(logs);
+      const result = await fn({ page, _cdp: { connection: cdpSession(peer, { type: "connection" }), browser: cdpSession(peer, { type: "browser" }) } });
+      restore(); restore = undefined;
       console.log(runSuccessJson(scriptAbs, result));
-    } catch (err) {
-      restore();
-      if (err instanceof HandshakeError) {
-        printHandshake(err.status, err.guide);
-      } else {
-        console.log(runFailureJson(err, scriptAbs));
-        process.exitCode = 1;
-      }
+    } catch (error) {
+      restore?.(); restore = undefined;
+      const status = error instanceof RpcError ? (error.data as { status?: string } | undefined)?.status : undefined;
+      if (status) console.log(JSON.stringify({ status, guide: error instanceof Error ? error.message : String(error) }, null, 2));
+      else { console.log(runFailureJson(error, scriptAbs)); process.exitCode = 1; }
     } finally {
-      await conn.send("run.end").catch(() => {});
-      conn.close();
+      restore?.();
+      if (peer) { await peer.request("run.end").catch(() => {}); peer.close(); }
     }
   },
-
-  record: {
-    async start(name?: string): Promise<void> {
-      assertNode24();
-      const res = await ensureSessionAndRpc(
-        { op: "record.start", ...(name ? { name } : {}) },
-        15_000,
-      );
-      printRecordResponse(res);
-    },
-    async stop(): Promise<void> {
-      assertNode24();
-      const res = await ensureSessionAndRpc({ op: "record.stop" }, RECORD_STOP_RPC_MS + CLI_RPC_BUFFER_MS);
-      printRecordResponse(res);
-    },
-    async abort(): Promise<void> {
-      assertNode24();
-      const res = await ensureSessionAndRpc({ op: "record.abort" }, 15_000);
-      printRecordResponse(res);
-    },
-  },
 };
-
-function printRecordResponse(res: SessionResponse): void {
-  if (res.ok) {
-    if (res.text) console.log(res.text);
-    return;
-  }
-  if (res.status) {
-    printHandshake(res.status, res.guide);
-    return;
-  }
-  console.log(JSON.stringify({ error: res.error ?? "record 失败" }));
-  process.exitCode = 1;
-}

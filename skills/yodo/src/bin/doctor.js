@@ -1,2 +1,2 @@
-import { yodo } from "../sdk.ts";
-await yodo.doctor();
+import { control } from "../control.ts";
+await control.doctor();

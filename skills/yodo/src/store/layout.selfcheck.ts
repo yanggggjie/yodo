@@ -5,6 +5,8 @@ import * as path from "node:path";
 import { ensureHomeLayout } from "./layout.ts";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-home-"));
+fs.mkdirSync(path.join(home, "task", "_common"), { recursive: true });
+fs.writeFileSync(path.join(home, "task", "_common", "old.js"), "old");
 ensureHomeLayout(home);
 
 for (const name of ["task", "temp", "record", "session"]) {
@@ -13,9 +15,9 @@ for (const name of ["task", "temp", "record", "session"]) {
 assert.ok(fs.existsSync(path.join(home, "record", ".active")));
 assert.ok(!fs.existsSync(path.join(home, "handbook")));
 assert.ok(!fs.existsSync(path.join(home, "learn")));
-assert.ok(!fs.existsSync(path.join(home, "task", "_common", "page-for-origin.js")));
-assert.ok(fs.existsSync(path.join(home, "task", "_common", "url.js")));
-assert.ok(!fs.existsSync(path.join(home, "task", "_common", "effect-after-run.js")));
+assert.ok(fs.existsSync(path.join(home, "task", "lib", "index.js")));
+assert.ok(fs.existsSync(path.join(home, "task", "lib", "url.js")));
+assert.ok(!fs.existsSync(path.join(home, "task", "_common")));
 assert.ok(fs.existsSync(path.join(home, "task", "package.json")));
 assert.ok(fs.existsSync(path.join(home, "temp", "package.json")));
 

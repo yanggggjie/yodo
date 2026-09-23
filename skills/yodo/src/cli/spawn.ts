@@ -15,7 +15,7 @@ import {
   HANDSHAKE_GUIDES,
   handshakeStatusFromMark,
   type HandshakeStatus,
-  type SessionResponse,
+  type JsonRpcError,
 } from "../protocol.ts";
 import { sessionRpc, SessionUnavailableError } from "./rpc.ts";
 
@@ -58,15 +58,14 @@ function clearStaleSession(): void {
 }
 
 /** ping 只有 ok 才是可复用 session。带 handshake status 的活进程当 stale。 */
-export function pingMeansReady(res: SessionResponse): boolean {
-  return res.ok === true;
-}
+type PingResult = { pid: number; chrome: string; pages: number; record: string | null };
+type AttachResult = { ok: true; result: PingResult } | { ok: false; error: JsonRpcError };
 
-async function tryPing(): Promise<SessionResponse | null> {
+async function tryPing(): Promise<PingResult | null> {
   const pid = readSessionPid();
   if (!pid || !isPidAlive(pid)) return null;
   try {
-    return await sessionRpc({ op: "ping" }, 2_000);
+    return await sessionRpc("ping", undefined, 2_000) as PingResult;
   } catch {
     return null;
   }
@@ -107,25 +106,19 @@ export function readHandshakeFromLogFile(file = SESSION_LOG): HandshakeStatus | 
   }
 }
 
-async function waitReady(pid: number, ms: number): Promise<SessionResponse> {
+async function waitReady(pid: number, ms: number): Promise<AttachResult> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     if (!isPidAlive(pid)) {
       const status = readHandshakeFromLogFile();
       if (status) {
-        return {
-          id: "",
-          ok: false,
-          status,
-          guide: HANDSHAKE_GUIDES[status],
-        };
+        return { ok: false, error: { code: -32010, message: HANDSHAKE_GUIDES[status], data: { status } } };
       }
       throw new Error(`holder 启动失败，详见 ${SESSION_LOG}`);
     }
     try {
-      const res = await sessionRpc({ op: "ping" }, 500);
-      if (res.ok) return res;
-      if (res.status) return res;
+      const result = await sessionRpc("ping", undefined, 500) as PingResult;
+      return { ok: true, result };
     } catch {
       /* still booting */
     }
@@ -133,21 +126,15 @@ async function waitReady(pid: number, ms: number): Promise<SessionResponse> {
   }
   const status = readHandshakeFromLogFile();
   if (status) {
-    return {
-      id: "",
-      ok: false,
-      status,
-      guide: HANDSHAKE_GUIDES[status],
-    };
+    return { ok: false, error: { code: -32010, message: HANDSHAKE_GUIDES[status], data: { status } } };
   }
   throw new Error(`holder 未就绪，详见 ${SESSION_LOG}`);
 }
 
-async function ensureAttached(): Promise<SessionResponse> {
+async function ensureAttached(): Promise<AttachResult> {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   const existing = await tryPing();
-  if (existing && pingMeansReady(existing)) return existing;
-  if (existing?.status) await stopCurrentHolder();
+  if (existing) return { ok: true, result: existing };
   const pid = readSessionPid();
   if (pid && isPidAlive(pid)) return waitReady(pid, HOLDER_READY_MS);
   clearStaleSession();
@@ -155,31 +142,33 @@ async function ensureAttached(): Promise<SessionResponse> {
 }
 
 export async function ensureSessionAndRpc(
-  req: Parameters<typeof sessionRpc>[0],
+  method: Parameters<typeof sessionRpc>[0],
+  params: Parameters<typeof sessionRpc>[1],
   ms: number,
-): Promise<SessionResponse> {
+): Promise<unknown> {
   const attached = await ensureAttached();
-  if (!attached.ok && attached.status) return attached;
-  return sessionRpc(req, ms);
+  if (!attached.ok) throw Object.assign(new Error(attached.error.message), attached.error);
+  return sessionRpc(method, params, ms);
 }
 
 /** 确保 holder 起来并就绪。就绪返回 null；被 handshake 挡住返回那条响应。 */
-export async function ensureHolder(): Promise<SessionResponse | null> {
+export async function ensureHolder(): Promise<JsonRpcError | null> {
   const attached = await ensureAttached();
-  return attached.ok ? null : attached;
+  return attached.ok ? null : attached.error;
 }
 
 export async function rpcExistingSession(
-  req: Parameters<typeof sessionRpc>[0],
+  method: Parameters<typeof sessionRpc>[0],
+  params: Parameters<typeof sessionRpc>[1],
   ms: number,
-): Promise<SessionResponse | null> {
+): Promise<unknown | null> {
   const pid = readSessionPid();
   if (!pid || !isPidAlive(pid)) {
     clearStaleSession();
     return null;
   }
   try {
-    return await sessionRpc(req, ms);
+    return await sessionRpc(method, params, ms);
   } catch (error) {
     if (error instanceof SessionUnavailableError) {
       clearStaleSession();

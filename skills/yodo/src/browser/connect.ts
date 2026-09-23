@@ -1,20 +1,15 @@
 /**
- * 主 Chrome（Stable）CDP 发现。永不杀浏览器、永不关 tab。
- * 连不上按层立刻失败，等人回「好了」再重试；不要轮询弹窗。
+ * 主 Chrome（Stable）CDP connection。永不杀浏览器、永不关 tab。
+ * 默认从 DevToolsActivePort 发现当前 browser WebSocket endpoint。
  */
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { sleep } from "../utils/async.ts";
-import { HANDSHAKE_GUIDES, type HandshakeStatus } from "../protocol.ts";
+import { HANDSHAKE_GUIDES } from "../protocol.ts";
 
-export type CdpErrorCode =
-  | "chrome-not-running"
-  | "cdp-toggle-off"
-  | "cdp-port-missing"
-  | "permission-blocked";
+export type CdpErrorCode = "permission-blocked";
 
 export class CdpError extends Error {
   readonly code: CdpErrorCode;
@@ -25,12 +20,10 @@ export class CdpError extends Error {
   }
 }
 
-/** 内部：拉起 Chrome vs 连已有进程。等人的 `need-*` 不在这里。 */
-export type LaunchPlan = "launch" | "connect";
-
 const TOGGLE_PAGE_URL = "chrome://inspect/#remote-debugging";
 const CHROME_LAUNCH_MS = 1_500;
-const PORT_WAIT_MS = 2_000;
+const ACTIVE_PORT_WAIT_MS = 2_000;
+const ACTIVE_PORT_RETRY_MS = 200;
 
 export class NeedInstallError extends Error {
   constructor() {
@@ -53,6 +46,16 @@ export class NeedRemoteDebuggingError extends Error {
   }
 }
 
+export class NeedFileAccessError extends Error {
+  readonly filePath: string;
+  constructor(filePath: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`${HANDSHAKE_GUIDES["need-file-access"]} 文件：${filePath}。系统错误：${detail}`);
+    this.name = "NeedFileAccessError";
+    this.filePath = filePath;
+  }
+}
+
 export class NeedAllowError extends Error {
   constructor() {
     super(HANDSHAKE_GUIDES["need-allow"]);
@@ -60,57 +63,12 @@ export class NeedAllowError extends Error {
   }
 }
 
-/** running 优先：已在跑就连。未安装返回 null，调用方抛 NeedInstallError。 */
-export function resolveLaunchPlan(
-  installed: boolean,
-  running: boolean,
-): LaunchPlan | null {
-  if (running) return "connect";
-  if (!installed) return null;
-  return "launch";
-}
-
-function handshakeError(kind: HandshakeStatus): Error {
-  if (kind === "need-install") return new NeedInstallError();
-  if (kind === "need-chrome") return new NeedChromeError();
-  if (kind === "need-remote-debugging") return new NeedRemoteDebuggingError();
-  return new NeedAllowError();
-}
-
-function toHandshakeError(error: unknown): Error {
-  if (error instanceof NeedInstallError) return error;
-  if (error instanceof NeedChromeError) return error;
-  if (error instanceof NeedRemoteDebuggingError) return error;
-  if (error instanceof NeedAllowError) return error;
-  if (error instanceof CdpError) {
-    if (error.code === "chrome-not-running") return handshakeError("need-chrome");
-    if (error.code === "cdp-toggle-off" || error.code === "cdp-port-missing") {
-      return handshakeError("need-remote-debugging");
-    }
-    if (error.code === "permission-blocked") return handshakeError("need-allow");
+export function chromeUserDataDir(platform = process.platform): string {
+  if (platform === "darwin") {
+    return path.join(os.homedir(), "Library/Application Support/Google/Chrome");
   }
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-function shouldOpenRemoteDebuggingPage(error: unknown): boolean {
-  return (
-    error instanceof NeedRemoteDebuggingError ||
-    (error instanceof CdpError &&
-      (error.code === "cdp-toggle-off" || error.code === "cdp-port-missing"))
-  );
-}
-
-function chromeUserDataDir(): string {
-  if (process.platform === "darwin") {
-    return path.join(
-      os.homedir(),
-      "Library/Application Support/Google/Chrome",
-    );
-  }
-  if (process.platform === "win32") {
-    const local =
-      process.env["LOCALAPPDATA"] ??
-      path.join(os.homedir(), "AppData", "Local");
+  if (platform === "win32") {
+    const local = process.env["LOCALAPPDATA"] ?? path.join(os.homedir(), "AppData", "Local");
     return path.join(local, "Google", "Chrome", "User Data");
   }
   return path.join(os.homedir(), ".config", "google-chrome");
@@ -150,148 +108,45 @@ export function chromeInstalled(): boolean {
   return chromeAppPath() !== null;
 }
 
-function portLive(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const s = net.connect({ host: "127.0.0.1", port }, () => {
-      s.end();
-      resolve(true);
-    });
-    s.on("error", () => resolve(false));
-    s.setTimeout(500, () => {
-      s.destroy();
-      resolve(false);
-    });
-  });
+export type ActivePort = { port: number; wsPath: string };
+
+export function parseDevToolsActivePort(content: string): ActivePort | null {
+  const lines = content.split(/\r?\n/).map((line) => line.trim());
+  const portText = lines[0] ?? "";
+  const wsPath = lines[1] ?? "";
+  if (!/^\d+$/.test(portText)) return null;
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  if (!wsPath.startsWith("/")) return null;
+  return { port, wsPath };
 }
 
-function chromeRunning(): boolean {
-  if (process.platform === "win32") {
-    try {
-      const out = child_process.execFileSync("tasklist", [], {
-        encoding: "utf8",
-        timeout: 5_000,
-      }).toLowerCase();
-      return out.includes("chrome.exe");
-    } catch {
-      return true;
-    }
-  }
-  const lock = path.join(chromeUserDataDir(), "SingletonLock");
+export function readDevToolsActivePort(filePath: string): ActivePort | null {
   try {
-    const target = fs.readlinkSync(lock);
-    const pid = Number(target.split("-").pop());
-    if (!Number.isFinite(pid) || pid <= 0) return false;
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  } catch {
-    return false;
+    return parseDevToolsActivePort(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    if (code === "EACCES" || code === "EPERM") throw new NeedFileAccessError(filePath, error);
+    throw error;
   }
 }
 
-function remoteDebuggingUserEnabled(): boolean | null {
-  const statePath = path.join(chromeUserDataDir(), "Local State");
+export async function endpointFromActivePort(active: ActivePort): Promise<string> {
+  let response: Response;
   try {
-    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
-      devtools?: { remote_debugging?: { "user-enabled"?: boolean } };
-    };
-    const v = state.devtools?.remote_debugging?.["user-enabled"];
-    if (v === true) return true;
-    if (v === false) return false;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function readActivePort(
-  base: string,
-): { port: number; wsPath: string } | null {
-  try {
-    const lines = fs
-      .readFileSync(path.join(base, "DevToolsActivePort"), "utf8")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const port = Number(lines[0]);
-    const wsPath = lines[1] ?? "";
-    if (!Number.isFinite(port) || port > 65535 || port <= 0) return null;
-    return { port, wsPath };
-  } catch {
-    return null;
-  }
-}
-
-async function wsFromHttp(port: number, wsPath: string): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetch(`http://127.0.0.1:${port}/json/version`, {
+    response = await fetch(`http://127.0.0.1:${active.port}/json/version`, {
       signal: AbortSignal.timeout(1_000),
     });
   } catch {
-    throw new Error("fetch-failed");
+    return `ws://127.0.0.1:${active.port}${active.wsPath}`;
   }
-  if (res.status === 403) {
-    throw new CdpError("permission-blocked", HANDSHAKE_GUIDES["need-allow"]);
+  if (response.status === 403) throw new NeedAllowError();
+  if (response.status === 404 || !response.ok) {
+    return `ws://127.0.0.1:${active.port}${active.wsPath}`;
   }
-  if (res.status === 404) {
-    if (!wsPath) throw new Error("404-no-path");
-    return `ws://127.0.0.1:${port}${wsPath}`;
-  }
-  if (!res.ok) throw new Error(`http-${res.status}`);
-  const body = (await res.json()) as { webSocketDebuggerUrl?: string };
-  if (!body.webSocketDebuggerUrl) throw new Error("no-ws");
-  return body.webSocketDebuggerUrl;
-}
-
-async function tryWs(): Promise<string | undefined> {
-  const base = chromeUserDataDir();
-  const active = readActivePort(base);
-  if (active && (await portLive(active.port))) {
-    try {
-      return await wsFromHttp(active.port, active.wsPath);
-    } catch (e) {
-      if (e instanceof CdpError) throw e;
-    }
-  }
-  for (const probe of [9222, 9223]) {
-    if (!(await portLive(probe))) continue;
-    try {
-      return await wsFromHttp(probe, "");
-    } catch (e) {
-      if (e instanceof CdpError) throw e;
-    }
-  }
-  return undefined;
-}
-
-async function getWsUrl(): Promise<string> {
-  if (!chromeRunning()) {
-    throw new CdpError("chrome-not-running", HANDSHAKE_GUIDES["need-chrome"]);
-  }
-  const first = await tryWs();
-  if (first) return first;
-  if (remoteDebuggingUserEnabled() === true) {
-    const deadline = Date.now() + PORT_WAIT_MS;
-    while (Date.now() < deadline) {
-      await sleep(200);
-      const url = await tryWs();
-      if (url) return url;
-    }
-  }
-  if (remoteDebuggingUserEnabled() === false) {
-    throw new CdpError(
-      "cdp-toggle-off",
-      HANDSHAKE_GUIDES["need-remote-debugging"],
-    );
-  }
-  throw new CdpError(
-    "cdp-port-missing",
-    HANDSHAKE_GUIDES["need-remote-debugging"],
-  );
+  const body = (await response.json()) as { webSocketDebuggerUrl?: string };
+  return body.webSocketDebuggerUrl || `ws://127.0.0.1:${active.port}${active.wsPath}`;
 }
 
 function spawnChrome(url?: string): void {
@@ -311,9 +166,10 @@ function spawnChrome(url?: string): void {
     }).unref();
     return;
   }
-  const exe = chromeAppPath() ?? "google-chrome-stable";
+  const executable = chromeAppPath();
+  if (!executable) throw new NeedInstallError();
   child_process
-    .spawn(exe, url ? [url] : [], { detached: true, stdio: "ignore" })
+    .spawn(executable, url ? [url] : [], { detached: true, stdio: "ignore" })
     .unref();
 }
 
@@ -325,20 +181,33 @@ function openRemoteDebuggingPage(): void {
   spawnChrome(TOGGLE_PAGE_URL);
 }
 
-/** 没开 Chrome 就拉起；按层失败，开关页只在 remote-debugging 层打开。 */
+async function waitForActivePort(filePath: string): Promise<ActivePort | null> {
+  const deadline = Date.now() + ACTIVE_PORT_WAIT_MS;
+  while (Date.now() < deadline) {
+    const active = readDevToolsActivePort(filePath);
+    if (active) return active;
+    await sleep(ACTIVE_PORT_RETRY_MS);
+  }
+  return null;
+}
+
+/** 启动或激活 Chrome，从 DevToolsActivePort 发现 browser WebSocket endpoint。 */
 export async function resolveWsEndpoint(): Promise<string> {
-  const plan = resolveLaunchPlan(chromeInstalled(), chromeRunning());
-  if (plan === null) throw new NeedInstallError();
-  if (plan === "launch") {
-    openChromeApp();
-    await sleep(CHROME_LAUNCH_MS);
-    if (!chromeRunning()) throw new NeedChromeError();
-  }
+  if (!chromeInstalled()) throw new NeedInstallError();
+
   try {
-    return await getWsUrl();
+    openChromeApp();
   } catch (error) {
-    const mapped = toHandshakeError(error);
-    if (shouldOpenRemoteDebuggingPage(mapped)) openRemoteDebuggingPage();
-    throw mapped;
+    if (error instanceof NeedInstallError) throw error;
+    throw new NeedChromeError();
   }
+
+  await sleep(CHROME_LAUNCH_MS);
+  const activePortFile = path.join(chromeUserDataDir(), "DevToolsActivePort");
+  const active = await waitForActivePort(activePortFile);
+  if (!active) {
+    openRemoteDebuggingPage();
+    throw new NeedRemoteDebuggingError();
+  }
+  return endpointFromActivePort(active);
 }

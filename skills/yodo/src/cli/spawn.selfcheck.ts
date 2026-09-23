@@ -6,21 +6,9 @@ import * as path from "node:path";
 import { handshakeStatusFromMark } from "../protocol.ts";
 import {
   isPidAlive,
-  pingMeansReady,
   readHandshakeFromLogFile,
   stopPid,
 } from "./spawn.ts";
-
-assert.equal(pingMeansReady({ id: "1", ok: true }), true);
-assert.equal(
-  pingMeansReady({
-    id: "1",
-    ok: false,
-    status: "need-allow",
-    guide: "x",
-  }),
-  false,
-);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-spawn-"));
 const logFile = path.join(dir, "log.jsonl");

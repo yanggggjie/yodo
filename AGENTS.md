@@ -1,6 +1,6 @@
 # AGENTS
 
-`user goal` 的处理流程与 canonical glossary 见 `skills/yodo/SKILL.md`。本文只规定仓库边界、开发验证、分发发布和运行时实现。
+`user goal` 的处理流程与 规范术语 见 `skills/yodo/SKILL.md`。本文只规定仓库边界、开发验证、分发发布和运行时实现。
 
 ## 1. 职责边界
 
@@ -19,18 +19,7 @@
 
 ### 2.1 本地安装
 
-开发、联调和本机 agent 安装统一运行：
-
-```bash
-npm run dev:install
-```
-
-该命令执行本地 `skills add`，把 skill 的 `src/` 复制到 `~/.yodo/src`，并在目标目录安装依赖。约束如下：
-
-- 不把 `node skills/yodo/setup.js` 当作日常开发入口。
-- 修改 `src/`、`skills/`、`templates/` 或 init 后，重新运行 `npm run dev:install`。
-- 开发安装不使用线上 `main`。
-- `~/.yodo/{task,temp,record,session}` 与运行时独立，更新不触碰这些用户数据。
+用户要求“本地安装”“从本地安装”“本地更新”或同义操作时，完整执行 `skills/yodo/install.md`。不在本文件重复安装、迁移或验收步骤。
 
 ### 2.2 检查与测试
 
@@ -67,10 +56,25 @@ skills/yodo/
 
 ### 3.2 发布规则
 
-- **安装**：对外命令为 `npx skills add yanggggjie/yodo`，来源是 GitHub 默认分支 `main`。
-- **发布**：不发布 npm 包，不创建 GitHub Release；把目标代码树合入 `main` 即完成发布。
-- **版本**：发布时把根 `package.json` 和 `skills/yodo/src/package.json` 更新为本次版本，并同步 `package-lock.json`。
+- **安装**：对外安装与更新以 `skills/yodo/install.md` 为准。
+- **开发**：可以在任意 branch 开发，不要求同步维护发布文档。
+- **发布**：不发布 npm 包，不创建 GitHub Release。release commit 进入 `main` 即完成发布。
 - **回溯**：需要可回溯版本时创建 `vX.Y.Z` tag。
+
+### 3.3 发布分支
+
+用户明确要求“发布分支”时，创建 `release/vX.Y.Z`，不修改 `main`，也不 push。然后：
+
+1. 把本次版本号改成一致：根 `package.json`、`skills/yodo/src/package.json`，以及 `skills/yodo/src/package-lock.json` 里 yodo 包自己的 `version`。
+2. 把本次发布里用户能感知的变化写入 README 的「2.2 更新记录」，版本号与上面相同。
+
+完成后停下来，等用户测试和检查。用户自己 push。
+
+### 3.4 发布到 `main`
+
+用户明确要求“发布到 main”时，将发布分支相对 `main` 的提交压缩为一个提交，合入 `main`。
+
+未收到“发布到 main”时，不得修改或 push `main`。
 
 ## 4. 运行时架构
 
@@ -80,9 +84,9 @@ skills/yodo/
 
 | 组成 | 文件 | 职责 |
 |---|---|---|
-| SDK | `src/sdk.ts` | 对外暴露 yodo API，并在 client 进程运行 `task` 闭包 |
-| 薄脚本 | `src/bin/*.js` | 组合 SDK，提供可直接执行的入口 |
-| `task` | 自执行程序 | 使用 SDK 完成一个可独立执行和复用的流程 |
+| Task SDK |- | 只向 task 暴露 `yodo.run()`，并在 client 进程运行 task 闭包 |
+| task lib | `~/.yodo/task/task-lib/` | 向 task 提供通用且有完整行为保证的 helper |
+| `task` |  `~/.yodo/task` | 使用 SDK 完成一个可独立执行和复用的流程 |
 
 修改 `capability` 时，不直接编辑 `~/.yodo/task` 中的文件。先复制到 `~/.yodo/temp` 作为 `candidate`，验证成功后再替换原文件；验证前必须保留原版本。
 
@@ -90,18 +94,14 @@ skills/yodo/
 
 `src/holder.ts` 是常驻进程，持有唯一 CDP 连接以维持 Chrome 远程调试授权。实测连接数归零时授权失效，因此 holder 必须常驻。
 
-holder 通过 socket 暴露高层 op：
+holder 通过 socket 暴露运行生命周期、通用 CDP 和 record RPC：
 
 ```text
 run.begin
 run.end
-page.goto
-page.evaluate
-page.url
-page.title
-page.close
-page.bring-to-front
-context.new-page
+cdp.send
+cdp.subscribe
+cdp.unsubscribe
 record.*
 ping
 ```
@@ -110,9 +110,9 @@ ping
 
 ### 4.3 client
 
-client 位于 `src/sdk.ts`。`yodo.run(fn)` 在当前 client 进程运行 `task` 闭包；`browserContext` 和 `page` 是 proxy，通过 socket 委托 holder 执行 CDP 并回传结果。
+client 位于 `src/sdk.ts`。`yodo.run(fn)` 在当前 client 进程运行 task 闭包，并直接提供当前 task 独占的运行页面 `page`。`page.cdp` 通过 socket 委托 holder 执行页面级 CDP；高级 `_cdp.connection` 和 `_cdp.browser` 只用于 page scope 不足时的排障或能力探索。
 
-`page.evaluate(fn, args)` 由 client 将 `fn.toString()` 和参数拼成表达式后发送。
+task 常用导航、evaluate 和 DOM 操作从 `~/.yodo/task/lib/index.js` 导入。Task SDK 不公开 start、stop、init、doctor 或 record 管理能力。
 
 ### 4.4 `record`
 

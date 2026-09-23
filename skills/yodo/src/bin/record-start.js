@@ -1,2 +1,2 @@
-import { yodo } from "../sdk.ts";
-await yodo.record.start(process.argv[2]);
+import { control } from "../control.ts";
+await control.record.start(process.argv[2]);

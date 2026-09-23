@@ -14,9 +14,9 @@ const server = net.createServer((socket) => {
     buf += chunk;
     const nl = buf.indexOf("\n");
     if (nl < 0) return;
-    const req = JSON.parse(buf.slice(0, nl)) as { id: string; op: string };
+    const req = JSON.parse(buf.slice(0, nl)) as { id: string; method: string };
     socket.end(
-      `${JSON.stringify({ id: req.id, ok: true, text: "pong", pid: process.pid })}\n`,
+      `${JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { text: "pong", pid: process.pid } })}\n`,
     );
   });
 });
@@ -27,8 +27,7 @@ await new Promise<void>((resolve, reject) => {
 });
 
 try {
-  const res = await sessionRpc({ op: "ping" }, 2_000, sock);
-  assert.equal(res.ok, true);
+  const res = await sessionRpc("ping", undefined, 2_000, sock) as { text: string; pid: number };
   assert.equal(res.text, "pong");
   assert.equal(res.pid, process.pid);
 } finally {

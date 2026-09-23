@@ -14,10 +14,11 @@ function copyIfPresent(source: string, target: string): void {
   if (fs.existsSync(source)) fs.cpSync(source, target, { force: true });
 }
 
-function syncCommon(taskDir: string): void {
-  const source = path.join(SRC_ROOT, "templates", "task-common");
+function syncLib(taskDir: string): void {
+  const source = path.join(SRC_ROOT, "templates", "task-lib");
   if (!fs.existsSync(source)) return;
-  const target = path.join(taskDir, "_common");
+  const target = path.join(taskDir, "lib");
+  fs.rmSync(path.join(taskDir, "_common"), { recursive: true, force: true });
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(target, { recursive: true });
   fs.cpSync(source, target, { recursive: true, force: true });
@@ -47,7 +48,7 @@ export function ensureHomeLayout(homeDir: string = YODO_HOME): void {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  syncCommon(taskDir);
+  syncLib(taskDir);
   copyIfPresent(
     path.join(SRC_ROOT, "templates", "task-package.json"),
     path.join(taskDir, "package.json"),

@@ -1,6 +1,6 @@
 {
   "name": "yodo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "description": "Use the user's logged-in Chrome to record a site, then run scripts",
@@ -16,6 +16,7 @@
     "tldts": "^7.4.11",
     "write-file-atomic": "^7.0.1",
     "@types/node": "^22.16.5",
-    "@types/write-file-atomic": "^4.0.3"
+    "@types/write-file-atomic": "^4.0.3",
+    "devtools-protocol": "^0.0.1701330"
   }
 }
