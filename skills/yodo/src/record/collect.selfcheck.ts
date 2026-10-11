@@ -10,7 +10,7 @@ import {
   startInjectEvents,
 } from "./collect.ts";
 import { DomRecordStore } from "./dom.ts";
-import type { RawCdpConnection } from "../browser/index.ts";
+import type { RawCdpConnection, TabOps } from "../browser/index.ts";
 import { isRawRequest } from "./types.ts";
 
 assert.ok(isRecordableUrl("https://example.com/a"));
@@ -32,310 +32,192 @@ assert.equal(tracker.isTargetIncluded("target_noopener_popup", undefined, undefi
 assert.equal(tracker.isTargetIncluded("target_other_window", undefined, 999, 11_000), false);
 assert.equal(tracker.isTargetIncluded("target_late", undefined, undefined, 15_000), false);
 
-const sent: { method: string; sessionId?: string; params?: Record<string, unknown> }[] = [];
-const handlers = new Map<string, (params: unknown, sessionId?: string) => void>();
-const raw: RawCdpConnection = {
-  browserSessionId: "browser",
-  commandTimeoutMs: 15_000,
-  send: async (method, params, sessionId) => {
-    sent.push({ method, params, sessionId });
-    if (method === "Browser.getWindowForTarget") {
-      const id = (params as { targetId?: string })?.targetId;
-      if (id === "fail") throw new Error("gone");
-      if (id === "ours" || id === "ntp") return { windowId: 1 };
-      return { windowId: 99 };
-    }
-    if (method === "Target.attachToTarget") {
-      return { sessionId: `s-attach-${(params as { targetId?: string })?.targetId ?? "x"}` };
-    }
-    if (method === "Page.getFrameTree") {
-      return { frameTree: { frame: { id: "f1", url: "https://z.com" } } };
-    }
-    if (method === "Runtime.evaluate") {
-      return {
-        result: {
-          value: {
-            ready: "complete",
-            html: "<html><body>late</body></html>",
-            href: "https://z.com/",
-          },
-        },
-      };
-    }
-    return {};
-  },
-  on: (method, handler) => {
-    handlers.set(method, handler);
-    return () => handlers.delete(method);
-  },
-  onClose: () => () => {},
-  isClosed: () => false,
-  close: async () => {},
-};
-const recTracker = new RecordWindowTracker();
-recTracker.initWindow("born", 1);
-const store = new ActiveRecordStore("selfcheck", Date.now(), "/tmp");
-const rec = await startCdpNetworkRecorder(raw, store, recTracker);
-assert.ok(sent.some((s) => s.method === "Target.setDiscoverTargets" && s.params?.discover === true));
-assert.ok(!sent.some((s) => s.method === "Target.setAutoAttach" && s.params?.autoAttach === true));
-const attach = handlers.get("Target.attachedToTarget");
-assert.ok(attach);
-const created = handlers.get("Target.targetCreated");
-assert.ok(created);
-const infoChanged = handlers.get("Target.targetInfoChanged");
-assert.ok(infoChanged);
+type Sent = { method: string; sessionId?: string; params?: Record<string, unknown> };
 
-sent.length = 0;
-attach({
-  sessionId: "s-other",
-  targetInfo: { targetId: "other", type: "page", url: "https://x.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Runtime.runIfWaitingForDebugger"));
-assert.ok(sent.some((s) => s.method === "Target.detachFromTarget"));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-
-sent.length = 0;
-attach({
-  sessionId: "s-fail",
-  targetInfo: { targetId: "fail", type: "page", url: "https://y.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Runtime.runIfWaitingForDebugger"));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-
-sent.length = 0;
-attach({
-  sessionId: "s-ours",
-  targetInfo: { targetId: "ours", type: "page", url: "https://z.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(sent.some((s) => s.method === "Network.enable"));
-assert.ok(!sent.some((s) => s.method === "Runtime.runIfWaitingForDebugger"));
-assert.ok(
-  sent.some(
-    (s) =>
-      s.method === "Target.setAutoAttach" &&
-      s.params?.autoAttach === true &&
-      s.params?.waitForDebuggerOnStart === false &&
-      s.sessionId === "s-ours",
-  ),
-);
-assert.ok(
-  !sent.some(
-    (s) =>
-      s.method === "Target.setAutoAttach" &&
-      s.params?.autoAttach === true &&
-      (s.sessionId === undefined || s.sessionId === "browser"),
-  ),
-);
-const late = store.events.find((e) => isRawRequest(e) && e.late === true);
-assert.ok(late && isRawRequest(late));
-assert.equal(late.url.bareUrl, "https://z.com/");
-assert.equal(late.method, undefined);
-assert.equal(late.status, undefined);
-
-sent.length = 0;
-created({
-  targetInfo: { targetId: "other-created", type: "page", url: "https://x.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Target.attachToTarget"));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-assert.ok(!sent.some((s) => s.method === "Target.detachFromTarget"));
-
-recTracker.recordGesture(Date.now());
-sent.length = 0;
-created({
-  targetInfo: { targetId: "gest-other", type: "page", url: "https://x.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Target.attachToTarget"));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-
-sent.length = 0;
-created({
-  targetInfo: { targetId: "ntp", type: "page", url: "chrome://new-tab-page" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Target.attachToTarget"));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-
-sent.length = 0;
-infoChanged({
-  targetInfo: { targetId: "ntp", type: "page", url: "https://z.com/" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(
-  sent.some((s) => s.method === "Target.attachToTarget" && s.params?.targetId === "ntp"),
-);
-assert.ok(sent.some((s) => s.method === "Network.enable"));
-
-await rec.stop();
-assert.ok(sent.some((s) => s.method === "Target.setDiscoverTargets" && s.params?.discover === false));
-sent.length = 0;
-attach({
-  sessionId: "s-after-stop",
-  targetInfo: { targetId: "ours", type: "page", url: "https://z.com" },
-});
-await new Promise((r) => setTimeout(r, 20));
-assert.ok(!sent.some((s) => s.method === "Network.enable"));
-
-{
+/** 内存版扩展：tab 操作记录到 calls；页面级命令记录到 sent；事件用 emit 模拟。 */
+function fakeExtension(tabsOwned: { tabId: number; windowId: number; url: string }[]) {
   const calls: { method: string; params?: Record<string, unknown> }[] = [];
-  const lastOnly = new RecordWindowTracker();
-  lastOnly.initWindow("born", 1);
-  await closeTrackedWindows(
-    {
-      send: async (method, params) => {
-        calls.push({ method, params });
-        if (method === "Target.getTargets") {
-          return { targetInfos: [{ targetId: "born", type: "page" }] };
-        }
-        if (method === "Browser.getWindowForTarget") return { windowId: 1 };
-        return {};
-      },
+  const tabs = [...tabsOwned];
+  const ops: TabOps = {
+    openWindow: async ({ focused }) => {
+      calls.push({ method: "openWindow", params: { focused } });
+      return { windowId: 500, tabId: 600 };
     },
-    lastOnly,
-  );
-  const keep = calls.find((c) => c.method === "Target.createTarget");
-  assert.equal(keep?.params?.newWindow, true);
-  assert.equal(keep?.params?.background, true);
-  assert.equal(keep?.params?.focus, false);
-  assert.ok(calls.some((c) => c.method === "Target.closeTarget" && c.params?.targetId === "born"));
-  assert.ok(!calls.some((c) => c.method === "Browser.close"));
+    openTab: async () => ({ tabId: 601 }),
+    closeTab: async (tabId) => {
+      calls.push({ method: "closeTab", params: { tabId } });
+    },
+    closeWindow: async () => {},
+    listOwned: async () => ({ tabs: [...tabs] }),
+    windowOf: async (tabId) => {
+      const t = tabs.find((x) => x.tabId === tabId);
+      if (!t) throw new Error("gone");
+      return { windowId: t.windowId, state: "normal" };
+    },
+    attach: async (tabId) => {
+      calls.push({ method: "attach", params: { tabId } });
+    },
+    detach: async (tabId) => {
+      calls.push({ method: "detach", params: { tabId } });
+    },
+  };
+  return { ops, calls, tabs };
 }
 
-{
-  const calls: { method: string; params?: Record<string, unknown> }[] = [];
-  const withOther = new RecordWindowTracker();
-  withOther.initWindow("born", 1);
-  await closeTrackedWindows(
-    {
-      send: async (method, params) => {
-        calls.push({ method, params });
-        if (method === "Target.getTargets") {
-          return {
-            targetInfos: [
-              { targetId: "born", type: "page" },
-              { targetId: "user", type: "page" },
-            ],
-          };
-        }
-        if (method === "Browser.getWindowForTarget") {
-          const id = (params as { targetId?: string })?.targetId;
-          return { windowId: id === "user" ? 2 : 1 };
-        }
-        return {};
-      },
-    },
-    withOther,
-  );
-  assert.ok(!calls.some((c) => c.method === "Target.createTarget"));
-  assert.ok(calls.some((c) => c.method === "Target.closeTarget" && c.params?.targetId === "born"));
-  assert.ok(!calls.some((c) => c.method === "Target.closeTarget" && c.params?.targetId === "user"));
-}
-
-{
-  const sentOnce: { method: string; sessionId?: string; params?: Record<string, unknown> }[] = [];
-  const handlersOnce = new Map<string, (params: unknown, sessionId?: string) => void>();
-  const rawOnce: RawCdpConnection = {
-    browserSessionId: "browser",
+function fakeRaw(ops: TabOps, sent: Sent[]) {
+  const handlers = new Map<string, (params: unknown, sessionId?: string) => void>();
+  const emit = (method: string, params: unknown, sessionId?: string) => handlers.get(method)?.(params, sessionId);
+  const raw: RawCdpConnection = {
+    ops,
+    chromeVersion: "test",
     commandTimeoutMs: 15_000,
     send: async (method, params, sessionId) => {
-      sentOnce.push({ method, params, sessionId });
-      if (method === "Browser.getWindowForTarget") return { windowId: 1 };
-      if (method === "Target.attachToTarget") return { sessionId: "s-manual" };
+      if (!sessionId) throw new Error(`browser 级 CDP 不可用：${method}`);
+      sent.push({ method, params, sessionId });
       if (method === "Page.getFrameTree") {
         return { frameTree: { frame: { id: "f1", url: "https://z.com" } } };
       }
       if (method === "Runtime.evaluate") {
         return {
           result: {
-            value: { ready: "complete", html: "<html></html>", href: "https://z.com/" },
+            value: { ready: "complete", html: "<html><body>late</body></html>", href: "https://z.com/" },
           },
         };
       }
       return {};
     },
     on: (method, handler) => {
-      handlersOnce.set(method, handler);
-      return () => handlersOnce.delete(method);
+      handlers.set(method, handler);
+      return () => handlers.delete(method);
     },
     onClose: () => () => {},
     isClosed: () => false,
     close: async () => {},
   };
-  const trackerOnce = new RecordWindowTracker();
-  trackerOnce.initWindow("ours", 1);
-  const storeOnce = new ActiveRecordStore("once", Date.now(), "/tmp");
-  const recOnce = await startCdpNetworkRecorder(rawOnce, storeOnce, trackerOnce);
-  const attachOnce = handlersOnce.get("Target.attachedToTarget");
-  assert.ok(attachOnce);
-
-  sentOnce.length = 0;
-  attachOnce({
-    sessionId: "s-first",
-    targetInfo: { targetId: "ours", type: "page", url: "https://z.com" },
-  });
-  await new Promise((r) => setTimeout(r, 20));
-  await recOnce.attachTarget("ours");
-  attachOnce({
-    sessionId: "s-second",
-    targetInfo: { targetId: "ours", type: "page", url: "https://z.com" },
-  });
-  await new Promise((r) => setTimeout(r, 20));
-
-  const enables = sentOnce.filter((s) => s.method === "Network.enable");
-  const scripts = sentOnce.filter((s) => s.method === "Page.addScriptToEvaluateOnNewDocument");
-  const bindings = sentOnce.filter((s) => s.method === "Runtime.addBinding");
-  assert.equal(enables.length, 1);
-  assert.equal(scripts.length, 1);
-  assert.equal(bindings.length, 1);
-  assert.ok(
-    sentOnce.some(
-      (s) => s.method === "Target.detachFromTarget" && s.params?.sessionId === "s-second",
-    ),
-  );
-  await recOnce.stop();
+  return { raw, emit };
 }
 
+const pause = () => new Promise((r) => setTimeout(r, 20));
+
+// 1. 发现与附加：录制窗内的新 tab 附加；无关窗口的 tab 不附加；chrome:// 不附加
 {
-  const handlersBind = new Map<string, (params: unknown, sessionId?: string) => void>();
-  const rawBind: RawCdpConnection = {
-    browserSessionId: "browser",
+  const ext = fakeExtension([{ tabId: 102, windowId: 1, url: "https://z.com" }]);
+  const sent: Sent[] = [];
+  const { raw, emit } = fakeRaw(ext.ops, sent);
+  const recTracker = new RecordWindowTracker();
+  recTracker.initWindow("101", 1);
+  const store = new ActiveRecordStore("selfcheck", Date.now(), "/tmp");
+  const rec = await startCdpNetworkRecorder(raw, store, recTracker);
+
+  emit("tab.created", { tabId: 103, windowId: 99, url: "https://x.com" });
+  await pause();
+  assert.ok(!ext.calls.some((c) => c.method === "attach" && c.params?.tabId === 103), "无关窗口的 tab 不附加");
+  assert.ok(!sent.some((s) => s.method === "Network.enable"));
+
+  emit("tab.created", { tabId: 104, windowId: 1, url: "chrome://new-tab-page" });
+  await pause();
+  assert.ok(!ext.calls.some((c) => c.method === "attach" && c.params?.tabId === 104), "chrome:// 不附加");
+
+  emit("tab.updated", { tabId: 104, windowId: 1, url: "https://z.com/" });
+  await pause();
+  assert.ok(ext.calls.some((c) => c.method === "attach" && c.params?.tabId === 104), "导航到真实页面后附加");
+  assert.ok(sent.some((s) => s.method === "Network.enable" && s.sessionId === "104"));
+  assert.ok(sent.some((s) => s.method === "Page.addScriptToEvaluateOnNewDocument" && s.sessionId === "104"));
+
+  // 同一个 tab 再次上报不重复附加
+  const attachesBefore = ext.calls.filter((c) => c.method === "attach").length;
+  emit("tab.updated", { tabId: 104, windowId: 1, url: "https://z.com/next" });
+  await pause();
+  assert.equal(ext.calls.filter((c) => c.method === "attach").length, attachesBefore);
+
+  // 录制结束：分离已附加的 tab
+  await rec.stop();
+  assert.ok(ext.calls.some((c) => c.method === "detach" && c.params?.tabId === 104));
+  emit("tab.created", { tabId: 105, windowId: 1, url: "https://z.com" });
+  await pause();
+  assert.ok(!ext.calls.some((c) => c.method === "attach" && c.params?.tabId === 105), "停止后不再附加");
+}
+
+// 2. 录制窗 tab 关闭：从 tracker 移除
+{
+  const ext = fakeExtension([]);
+  const sent: Sent[] = [];
+  const { raw, emit } = fakeRaw(ext.ops, sent);
+  const t = new RecordWindowTracker();
+  t.initWindow("201", 3);
+  t.initWindow("202", 3);
+  const store = new ActiveRecordStore("removed", Date.now(), "/tmp");
+  const rec = await startCdpNetworkRecorder(raw, store, t);
+  emit("tab.removed", { tabId: 201, windowId: 3 });
+  assert.equal(t.isKnownTarget("201"), false);
+  assert.equal(t.isKnownTarget("202"), true);
+  await rec.stop();
+}
+
+// 3. closeTrackedWindows：只关 tracker 登记的窗口；用户窗口不动
+{
+  // listOwned 只含 yodo 的 tab；用户的 tab（302）不在其中
+  const ext = fakeExtension([{ tabId: 301, windowId: 10, url: "https://z.com" }]);
+  const sent: Sent[] = [];
+  const { raw } = fakeRaw(ext.ops, sent);
+  const t = new RecordWindowTracker();
+  t.initWindow("301", 10);
+  await closeTrackedWindows(raw, t);
+  assert.ok(ext.calls.some((c) => c.method === "closeTab" && c.params?.tabId === 301));
+  assert.ok(!ext.calls.some((c) => c.method === "closeTab" && c.params?.tabId === 302), "用户窗口的 tab 不关");
+  assert.ok(ext.calls.some((c) => c.method === "openWindow"), "没有其它窗口时开一扇后台窗");
+}
+
+// 4. 同一 tab 重复附加只会 pipeline 一次
+{
+  const ext = fakeExtension([{ tabId: 401, windowId: 1, url: "https://z.com" }]);
+  const sent: Sent[] = [];
+  const { raw, emit } = fakeRaw(ext.ops, sent);
+  const t = new RecordWindowTracker();
+  t.initWindow("400", 1);
+  const store = new ActiveRecordStore("once", Date.now(), "/tmp");
+  const rec = await startCdpNetworkRecorder(raw, store, t);
+  emit("tab.created", { tabId: 401, windowId: 1, url: "https://z.com" });
+  await pause();
+  await rec.attachTarget("401");
+  emit("tab.updated", { tabId: 401, windowId: 1, url: "https://z.com/2" });
+  await pause();
+  assert.equal(sent.filter((s) => s.method === "Network.enable").length, 1);
+  assert.equal(sent.filter((s) => s.method === "Page.addScriptToEvaluateOnNewDocument").length, 1);
+  assert.equal(sent.filter((s) => s.method === "Runtime.addBinding").length, 1);
+  await rec.stop();
+}
+
+// 5. 页面事件注入：binding 事件按 sessionId 归属；未知 session 忽略
+{
+  const handlers = new Map<string, (params: unknown, sessionId?: string) => void>();
+  const sent: Sent[] = [];
+  const raw: RawCdpConnection = {
+    ops: fakeExtension([]).ops,
+    chromeVersion: "test",
     commandTimeoutMs: 15_000,
-    send: async () => ({}),
+    send: async (method, params, sessionId) => {
+      sent.push({ method, params, sessionId });
+      return {};
+    },
     on: (method, handler) => {
-      handlersBind.set(method, handler);
-      return () => handlersBind.delete(method);
+      handlers.set(method, handler);
+      return () => handlers.delete(method);
     },
     onClose: () => () => {},
     isClosed: () => false,
     close: async () => {},
   };
   const trackerBind = new RecordWindowTracker();
-  trackerBind.initWindow("ours", 1);
+  trackerBind.initWindow("501", 1);
   const storeBind = new ActiveRecordStore("bind", Date.now(), "/tmp");
   const domStore = new DomRecordStore();
-  const inject = startInjectEvents(
-    rawBind,
-    storeBind,
-    trackerBind,
-    new Map([["s-known", "ours"]]),
-    domStore,
-  );
-  const onBinding = handlersBind.get("Runtime.bindingCalled");
+  const inject = startInjectEvents(raw, storeBind, trackerBind, new Map([["501", "501"]]), domStore);
+  const onBinding = handlers.get("Runtime.bindingCalled");
   assert.ok(onBinding);
-  const payload = JSON.stringify({
-    kind: "click",
-    frameUrl: "https://z.com",
-    role: "button",
-    name: "ok",
-    startedAt: 1000,
-  });
-  onBinding({ name: "__yodoEvent", payload }, "s-known");
-  onBinding({ name: "__yodoEvent", payload }, "s-unknown");
+  const payload = JSON.stringify({ kind: "click", frameUrl: "https://z.com", role: "button", name: "ok", startedAt: 1000 });
+  onBinding({ name: "__yodoEvent", payload }, "501");
+  onBinding({ name: "__yodoEvent", payload }, "999");
   onBinding({ name: "__yodoEvent", payload });
   const clicks = domStore.events.filter((e) => e.type === "click");
   assert.equal(clicks.length, 1);

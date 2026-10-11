@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
-import { connectChrome, disconnectChrome, setDiscoverTargets, setIgnoreCertificateErrors, setPageAutoAttach, type CdpBrowser, type CdpContext, type CdpPage } from "./browser/index.ts";
+import { connectChrome, disconnectChrome, ExtensionLink, frame, parseFrames, setActiveLink, type CdpBrowser, type CdpContext, type CdpPage } from "./browser/index.ts";
 import { finishRecord, liveRecordName, startRecord } from "./record/index.ts";
 import { sweepDeadActive } from "./store/repository.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
@@ -45,7 +45,7 @@ async function ensureChrome(): Promise<void> { if (!chromeReady) chromeReady = t
 async function settleIdle(): Promise<void> {
   if (!browser || !context || liveRecordName()) return;
   const previous = browser.raw.commandTimeoutMs; browser.raw.commandTimeoutMs = CDP_SHORT_TIMEOUT_MS;
-  try { await context.detachAllPages(context.runKeepIds()).catch(warnCatch("detachAllPages")); await setPageAutoAttach(browser.raw, false); await setDiscoverTargets(browser.raw, false); await setIgnoreCertificateErrors(browser.raw, false); }
+  try { await context.detachAllPages(context.runKeepIds()).catch(warnCatch("detachAllPages")); await context.setIgnoreCertErrors(false); }
   finally { browser.raw.commandTimeoutMs = previous; }
 }
 
@@ -63,7 +63,8 @@ async function runEnd(conn = activeRunConn): Promise<void> {
 function pageById(id: unknown): CdpPage { if (typeof id !== "string") throw Object.assign(new Error("缺少 pageId"), { code: RPC_ERRORS.INVALID_PARAMS }); const page = context?.getPage(id); if (!page) throw Object.assign(new Error(`page 不存在或已关闭：${id}`), { code: RPC_ERRORS.PAGE_NOT_FOUND }); return page; }
 function paramsOf(req: JsonRpcRequest): Record<string, unknown> { return req.params ?? {}; }
 function scopeOf(value: unknown): CdpScope { if (!value || typeof value !== "object") throw Object.assign(new Error("无效 CDP scope"), { code: RPC_ERRORS.INVALID_PARAMS }); const scope = value as CdpScope; if (scope.type === "connection" || scope.type === "browser") return scope; if (scope.type === "page" && typeof scope.pageId === "string") return scope; throw Object.assign(new Error("无效 CDP scope"), { code: RPC_ERRORS.INVALID_PARAMS }); }
-function sessionIdOf(scope: CdpScope): string | undefined { if (scope.type === "connection") return undefined; if (scope.type === "browser") return browser!.raw.browserSessionId; return pageById(scope.pageId).sessionId; }
+/** 扩展里没有 browser 级会话：connection / browser scope 发出的命令没有 tab，会被 raw.send 拒绝。 */
+function sessionIdOf(scope: CdpScope): string | undefined { if (scope.type === "connection" || scope.type === "browser") return undefined; return pageById(scope.pageId).sessionId; }
 function sameScope(scope: CdpScope, sessionId?: string): boolean { return sessionIdOf(scope) === sessionId; }
 function assertCdpAllowed(method: string): void { if (FORBIDDEN_ADVANCED.has(method)) throw Object.assign(new Error(`禁止 task 调用 ${method}`), { code: RPC_ERRORS.FORBIDDEN_CDP }); }
 
@@ -80,7 +81,7 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
         if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY });
         activeRunConn = conn; conn.runActive = true;
         try {
-          browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS; await setIgnoreCertificateErrors(browser!.raw, true);
+          browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS; await context!.setIgnoreCertErrors(true);
           const page = await context!.newPage(); return { pageId: page.targetId };
         } catch (error) {
           await runEnd(conn);
@@ -105,7 +106,7 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
       case "record.start": {
         if (activeRunConn) throw Object.assign(new Error("run 进行中；请等结束再 record start"), { code: RPC_ERRORS.RUN_BUSY });
         if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY }); recordBusy = true;
-        try { await setIgnoreCertificateErrors(browser!.raw, true); return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
+        try { await context!.setIgnoreCertErrors(true); return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
         catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
         finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }
       }
@@ -136,9 +137,55 @@ function onConnection(socket: net.Socket): void {
 
 async function shutdown(code: number): Promise<void> { if (shuttingDown) return; shuttingDown = true; if (liveRecordName()) await finishRecord("disconnect").catch(warnCatch("disconnect flush")); await context?.closeRunWindow().catch(warnCatch("closeRunWindow")); await settleIdle().catch(warnCatch("settleIdle")); server?.close(); if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); fs.rmSync(SESSION_PID_FILE, { force: true }); if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome")); process.exit(code); }
 
+/** 已有 holder 在监听 socket 时返回 true：新 holder 不应覆盖它。 */
+function socketAlive(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (SESSION_SOCK_IS_FILE && !fs.existsSync(SESSION_SOCK)) { resolve(false); return; }
+    const probe = net.connect(SESSION_SOCK);
+    const done = (ok: boolean): void => { probe.destroy(); resolve(ok); };
+    probe.once("connect", () => done(true));
+    probe.once("error", () => done(false));
+    probe.setTimeout(500, () => done(false));
+  });
+}
+
+/** stdout 是 native messaging 通道：任何写 stdout 的代码都会破坏协议，所以 console.log 改走 stderr。 */
+function startExtensionLink(): Promise<void> {
+  console.log = (...args: unknown[]) => console.error(...args);
+  const link = new ExtensionLink();
+  setActiveLink(link);
+  link.write = (message) => { process.stdout.write(frame(message)); };
+  link.onClose(() => void shutdown(0));
+  let buffer: Buffer = Buffer.alloc(0);
+  let helloDone = false;
+  return new Promise<void>((resolve, reject) => {
+    process.stdin.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      try {
+        buffer = parseFrames(buffer, (msg) => {
+          if (!helloDone) {
+            if (msg.type !== "hello") return;
+            link.hello(msg);
+            helloDone = true;
+            resolve();
+            return;
+          }
+          link.receive(msg);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+    process.stdin.on("end", () => void shutdown(0));
+  });
+}
+
 export async function runHolder(): Promise<void> {
-  fs.mkdirSync(SESSION_DIR, { recursive: true }); setLogFile(SESSION_LOG); fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 }); ensureHomeLayout(); await sweepDeadActive().catch(warnCatch("sweepDeadActive"));
+  fs.mkdirSync(SESSION_DIR, { recursive: true }); setLogFile(SESSION_LOG); ensureHomeLayout(); await sweepDeadActive().catch(warnCatch("sweepDeadActive"));
+  if (await socketAlive()) { logger.warn("已有 holder 在运行，本进程退出"); process.exit(0); }
+  fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 });
   process.on("SIGINT", () => void shutdown(0)); process.on("SIGTERM", () => void shutdown(0)); process.on("uncaughtException", (error) => { logger.error("uncaughtException", error); void shutdown(1); }); process.on("unhandledRejection", (error) => { logger.error("unhandledRejection", error); void shutdown(1); });
+  try { await startExtensionLink(); } catch (error) { logger.error("扩展握手失败", error); await shutdown(1); return; }
   if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); server = net.createServer(onConnection); await new Promise<void>((resolve, reject) => { server!.listen(SESSION_SOCK, resolve); server!.on("error", reject); }); if (SESSION_SOCK_IS_FILE) fs.chmodSync(SESSION_SOCK, 0o600);
   chromeReady = tryConnectChrome(); try { await chromeReady; } catch (error) { const status = handshakeStatusFromError(error); if (status) logger.warn(HANDSHAKE_MARKS[status]); else logger.error("connect failed", error); await shutdown(1); return; }
   await new Promise(() => {});

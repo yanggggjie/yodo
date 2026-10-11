@@ -9,15 +9,8 @@ import {
 } from "./protocol.ts";
 
 assert.equal(handshakeStatusFromMark("yodo:need-install"), "need-install");
-assert.equal(
-  handshakeStatusFromMark(`boom\n${HANDSHAKE_MARKS["need-allow"]}\n`),
-  "need-allow",
-);
-assert.equal(
-  handshakeStatusFromMark(`x ${HANDSHAKE_MARKS["need-remote-debugging"]}`),
-  "need-remote-debugging",
-);
-assert.equal(handshakeStatusFromMark("Error: raw CDP WebSocket open failed"), null);
+assert.equal(handshakeStatusFromMark(`boom\n${HANDSHAKE_MARKS["need-extension"]}\n`), "need-extension");
+assert.equal(handshakeStatusFromMark("Error: 扩展通道已关闭"), null);
 
 class NeedInstallError extends Error {
   constructor() {
@@ -25,48 +18,29 @@ class NeedInstallError extends Error {
     this.name = "NeedInstallError";
   }
 }
-class NeedRemoteDebuggingError extends Error {
+class NeedChromeError extends Error {
   constructor() {
     super("x");
-    this.name = "NeedRemoteDebuggingError";
+    this.name = "NeedChromeError";
   }
 }
-class NeedFileAccessError extends Error {
+class NeedExtensionError extends Error {
   constructor() {
     super("x");
-    this.name = "NeedFileAccessError";
-  }
-}
-class CdpError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super("x");
-    this.code = code;
-    this.name = "CdpError";
+    this.name = "NeedExtensionError";
   }
 }
 
 assert.equal(handshakeStatusFromError(new NeedInstallError()), "need-install");
-assert.equal(handshakeStatusFromError(new NeedRemoteDebuggingError()), "need-remote-debugging");
-assert.equal(handshakeStatusFromError(new NeedFileAccessError()), "need-file-access");
-assert.equal(
-  handshakeStatusFromError(new CdpError("permission-blocked")),
-  "need-allow",
-);
+assert.equal(handshakeStatusFromError(new NeedChromeError()), "need-chrome");
+assert.equal(handshakeStatusFromError(new NeedExtensionError()), "need-extension");
 assert.equal(handshakeStatusFromError(new Error("stack")), null);
 
-const stdout = formatHandshakeStdout("need-allow");
-const parsed = JSON.parse(stdout) as {
-  status: string;
-  guide: string;
-};
-assert.equal(parsed.status, "need-allow");
-assert.equal(parsed.guide, HANDSHAKE_GUIDES["need-allow"]);
+const parsed = JSON.parse(formatHandshakeStdout("need-extension")) as { status: string; guide: string };
+assert.equal(parsed.status, "need-extension");
+assert.equal(parsed.guide, HANDSHAKE_GUIDES["need-extension"]);
 assert.deepEqual(Object.keys(parsed).sort(), ["guide", "status"]);
-
-const installOut = formatHandshakeStdout("need-install");
-assert.match(installOut, /"status": "need-install"/);
-assert.doesNotMatch(installOut, /phase/);
+assert.match(formatHandshakeStdout("need-install"), /"status": "need-install"/);
 assert.equal(formatErrorStdout("boom"), '{"error":"boom"}');
 
 console.log("protocol selfcheck ok");

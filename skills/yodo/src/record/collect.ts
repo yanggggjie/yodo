@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { MAX_BODY_BYTES, RESPONSE_SPLIT_BYTES } from "../utils/constants.ts";
 import { parseUrl } from "../utils/url.ts";
 import { createLogger } from "../utils/logger.ts";
-import { closeTargetsKeepChrome, isChromeUiUrl, setDiscoverTargets, setPageAutoAttach, type RawCdpConnection } from "../browser/index.ts";
+import { closeTargetsKeepChrome, isChromeUiUrl, type RawCdpConnection } from "../browser/index.ts";
 import type { RawEvent, RawRequest, RequestKind } from "./types.ts";
 import type { DomRecordStore } from "./dom.ts";
 
@@ -95,37 +95,22 @@ export class RecordWindowTracker {
   }
 }
 
-/** 只关录制窗的 page。若关完会变成最后一扇窗，先开一扇普通窗。不用 Browser.close。 */
+/** 只关录制窗的 tab。扩展里 listOwned 给出每个 tab 所在的窗口，按 tracker 登记的窗口过滤。 */
 export async function closeTrackedWindows(
-  raw: Pick<RawCdpConnection, "send">,
+  raw: RawCdpConnection,
   tracker: RecordWindowTracker,
 ): Promise<void> {
   const closing = new Set(tracker.activeTargets);
-  let pages: { targetId: string; type?: string }[] = [];
   try {
-    const res = (await raw.send("Target.getTargets")) as {
-      targetInfos?: { targetId: string; type?: string }[];
-    };
-    pages = (res.targetInfos ?? []).filter((t) => t.type === "page");
-  } catch {
-    pages = [];
-  }
-
-  for (const t of pages) {
-    try {
-      const win = (await raw.send("Browser.getWindowForTarget", {
-        targetId: t.targetId,
-      })) as { windowId?: number };
-      if (win?.windowId !== undefined && tracker.activeWindowIds.has(win.windowId)) {
-        closing.add(t.targetId);
-      }
-    } catch {
-      /* gone */
+    const { tabs } = await raw.ops.listOwned();
+    for (const t of tabs) {
+      if (tracker.activeWindowIds.has(t.windowId)) closing.add(String(t.tabId));
     }
+  } catch {
+    /* 扩展不可用时只关已知 target */
   }
-
   if (closing.size === 0) return;
-  await closeTargetsKeepChrome(raw as RawCdpConnection, closing);
+  await closeTargetsKeepChrome(raw, closing);
 }
 
 export class ActiveRecordStore {
@@ -615,12 +600,11 @@ export async function startCdpNetworkRecorder(
     type: string;
     url?: string;
     openerId?: string;
+    windowId?: number;
   };
 
   function detachSession(sessionId: string): void {
-    raw
-      .send("Target.detachFromTarget", { sessionId }, raw.browserSessionId)
-      .catch(() => {});
+    raw.ops.detach(Number(sessionId)).catch(() => {});
     pendingSessions.delete(sessionId);
   }
 
@@ -628,17 +612,15 @@ export async function startCdpNetworkRecorder(
     if (stopping || sessionsByTarget.has(targetId) || pipelinedTargets.has(targetId)) return;
     if (isChromeUiUrl(url)) return;
     try {
-      const attachRes = (await raw.send("Target.attachToTarget", {
-        targetId,
-        flatten: true,
-      })) as { sessionId: string };
-      if (!attachRes?.sessionId) return;
-      pendingSessions.add(attachRes.sessionId);
+      // sessionId 即 targetId（扩展里 tabId 的字符串形式）
+      await raw.ops.attach(Number(targetId));
+      const sessionId = targetId;
+      pendingSessions.add(sessionId);
       if (stopping) {
-        detachSession(attachRes.sessionId);
+        detachSession(sessionId);
         return;
       }
-      pipelineTarget(attachRes.sessionId, targetId, url);
+      pipelineTarget(sessionId, targetId, url);
     } catch {
       /* target may have attached via page autoAttach */
     }
@@ -650,17 +632,7 @@ export async function startCdpNetworkRecorder(
     if (sessionsByTarget.has(info.targetId) || pipelinedTargets.has(info.targetId)) return;
     const url = info.url || "";
     if (isChromeUiUrl(url)) return;
-    let windowId: number | undefined;
-    try {
-      const win = (await raw.send(
-        "Browser.getWindowForTarget",
-        { targetId: info.targetId },
-        raw.browserSessionId,
-      )) as { windowId?: number };
-      windowId = win?.windowId;
-    } catch {
-      return;
-    }
+    const windowId = info.windowId;
     if (stopping) return;
     const included = tracker.isTargetIncluded(
       info.targetId,
@@ -698,7 +670,6 @@ export async function startCdpNetworkRecorder(
       sessionId,
     ).catch(() => {});
     raw.send("Network.enable", networkEnableParams, sessionId).catch(() => {});
-    setPageAutoAttach(raw, true, sessionId);
   }
 
   function hasMainDoc(targetId: string): boolean {
@@ -862,104 +833,45 @@ export async function startCdpNetworkRecorder(
       }
     }),
 
-    raw.on("Target.attachedToTarget", (params) => {
-      const e = params as {
-        sessionId: string;
-        targetInfo: {
-          targetId: string;
-          type: string;
-          url?: string;
-          openerId?: string;
-        };
-      };
-
-      const { sessionId, targetInfo } = e;
-      const targetId = targetInfo.targetId;
-      pendingSessions.add(sessionId);
-
-      if (stopping) {
-        detachSession(sessionId);
-        return;
-      }
-
-      if (targetInfo.type !== "page" || isChromeUiUrl(targetInfo.url || "")) {
-        detachSession(sessionId);
-        return;
-      }
-
-      void (async () => {
-        try {
-          if (stopping) {
-            detachSession(sessionId);
-            return;
-          }
-          let windowId: number | undefined;
-          try {
-            const win = (await raw.send(
-              "Browser.getWindowForTarget",
-              { targetId },
-              raw.browserSessionId,
-            )) as { windowId?: number };
-            windowId = win?.windowId;
-          } catch {
-            /* gone */
-          }
-          if (stopping) {
-            detachSession(sessionId);
-            return;
-          }
-          const included = tracker.isTargetIncluded(
-            targetId,
-            targetInfo.openerId,
-            windowId,
-            Date.now(),
-          );
-          if (!included) {
-            detachSession(sessionId);
-            return;
-          }
-          if (!pipelineTarget(sessionId, targetId, targetInfo.url || "about:blank")) {
-            const existing = sessionsByTarget.get(targetId);
-            if (!existing || existing.sessionId !== sessionId) {
-              detachSession(sessionId);
-            }
-          }
-        } catch {
-          detachSession(sessionId);
-        }
-      })();
+    raw.on("tab.created", (params) => {
+      const t = params as { tabId: number; windowId: number; openerTabId?: number; url?: string };
+      void maybeAttachDiscovered({
+        targetId: String(t.tabId),
+        type: "page",
+        url: t.url,
+        openerId: t.openerTabId != null ? String(t.openerTabId) : undefined,
+        windowId: t.windowId,
+      });
     }),
 
-    raw.on("Target.targetCreated", (params) => {
-      const created = params as { targetInfo: DiscoveredTarget };
-      if (!created?.targetInfo) return;
-      void maybeAttachDiscovered(created.targetInfo);
+    raw.on("tab.updated", (params) => {
+      const t = params as { tabId: number; windowId: number; url?: string };
+      void maybeAttachDiscovered({
+        targetId: String(t.tabId),
+        type: "page",
+        url: t.url,
+        windowId: t.windowId,
+      });
     }),
 
-    raw.on("Target.targetInfoChanged", (params) => {
-      const changed = params as { targetInfo: DiscoveredTarget };
-      if (!changed?.targetInfo) return;
-      void maybeAttachDiscovered(changed.targetInfo);
-    }),
-
-    raw.on("Target.detachedFromTarget", (params) => {
-      const e = params as { sessionId: string; targetId?: string };
-      const ps = sessionsBySessionId.get(e.sessionId);
+    raw.on("tab.detached", (params) => {
+      const { tabId } = params as { tabId: number };
+      const sessionId = String(tabId);
+      const ps = sessionsBySessionId.get(sessionId);
       if (ps) {
-        sessionsBySessionId.delete(e.sessionId);
+        sessionsBySessionId.delete(sessionId);
         sessionsByTarget.delete(ps.targetId);
-        sessionToTarget.delete(e.sessionId);
+        sessionToTarget.delete(sessionId);
       }
     }),
 
-    raw.on("Target.targetDestroyed", (params) => {
-      const e = params as { targetId: string };
-      tracker.removeTarget(e.targetId);
-      ignoredTargets.delete(e.targetId);
+    raw.on("tab.removed", (params) => {
+      const { tabId } = params as { tabId: number };
+      const targetId = String(tabId);
+      tracker.removeTarget(targetId);
+      ignoredTargets.delete(targetId);
     }),
   ];
-
-  await setDiscoverTargets(raw, true);
 
   return {
     sessionToTarget,
@@ -1004,21 +916,12 @@ export async function startCdpNetworkRecorder(
     },
     stop: async () => {
       stopping = true;
-      await setDiscoverTargets(raw, false);
-      await setPageAutoAttach(raw, false);
       const sessionIds = new Set([
         ...pendingSessions,
         ...[...sessionsBySessionId.values()].map((ps) => ps.sessionId),
       ]);
       await Promise.all(
-        [...sessionIds].map((sessionId) => setPageAutoAttach(raw, false, sessionId)),
-      );
-      await Promise.all(
-        [...sessionIds].map((sessionId) =>
-          raw
-            .send("Target.detachFromTarget", { sessionId }, raw.browserSessionId)
-            .catch(() => {}),
-        ),
+        [...sessionIds].map((sessionId) => raw.ops.detach(Number(sessionId)).catch(() => {})),
       );
       for (const off of offEvents) off();
       const incomplete = store.dropIncompleteRequests();

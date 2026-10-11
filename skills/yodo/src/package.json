@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "npx -y -p typescript@^5.8.3 tsc -p tsconfig.json",
-    "test": "find . -name '*.selfcheck.ts' | sort | while read -r f; do node \"$f\" || exit 1; done"
+    "test": "find . -path ./node_modules -prune -o \\( -name '*.selfcheck.ts' -o -name '*.selfcheck.mjs' \\) -print | sort | while read -r f; do node \"$f\" || exit 1; done"
   },
   "dependencies": {
     "@ghostery/adblocker": "^2.18.2",

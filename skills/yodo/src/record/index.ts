@@ -10,7 +10,6 @@ import {
   sweepDeadActive,
 } from "../store/repository.ts";
 import type { CdpBrowser, CdpContext, RawCdpConnection } from "../browser/index.ts";
-import { setDiscoverTargets, setIgnoreCertificateErrors, setPageAutoAttach } from "../browser/index.ts";
 import {
   ActiveRecordStore,
   closeTrackedWindows,
@@ -37,6 +36,7 @@ let domStore: DomRecordStore | null = null;
 let active: ActiveRecordStore | null = null;
 let windowTracker: RecordWindowTracker | null = null;
 let recordRaw: RawCdpConnection | null = null;
+let recordContext: CdpContext | null = null;
 let maxTimer: ReturnType<typeof setTimeout> | null = null;
 let finishing: Promise<string> | null = null;
 let adblockEngine: Awaited<ReturnType<typeof loadAdblockEngine>> | undefined;
@@ -89,6 +89,7 @@ export async function startRecord(
   const tracker = new RecordWindowTracker();
   windowTracker = tracker;
   recordRaw = browser.raw;
+  recordContext = context;
 
   try {
     const raw = browser.raw;
@@ -121,14 +122,13 @@ export async function startRecord(
   } catch (error) {
     await stopRecorders().catch(() => {});
     await closeRecordWindows().catch(() => {});
-    await setDiscoverTargets(browser.raw, false).catch(() => {});
-    await setPageAutoAttach(browser.raw, false).catch(() => {});
-    await setIgnoreCertificateErrors(browser.raw, false).catch(() => {});
+    await context.setIgnoreCertErrors(false).catch(() => {});
     await releaseActive(name).catch(() => {});
     clearMaxTimer();
     active = null;
     windowTracker = null;
     recordRaw = null;
+    recordContext = null;
     throw error;
   }
 }
@@ -144,12 +144,13 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
     await stopRecorders();
     domStore?.deactivate();
     await closeRecordWindows();
-    if (recordRaw) await setIgnoreCertificateErrors(recordRaw, false);
+    if (recordContext) await recordContext.setIgnoreCertErrors(false);
   } finally {
     current.deactivate();
     active = null;
     windowTracker = null;
     recordRaw = null;
+    recordContext = null;
   }
 
   if (reason === "abort") {

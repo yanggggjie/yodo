@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
 import { stopCurrentHolder } from "./src/cli/spawn.ts";
+import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
 
 const major = Number(process.versions.node.split(".")[0]);
 if (!Number.isFinite(major) || major < 24) {
@@ -51,6 +52,10 @@ if (!fs.existsSync(path.join(DEST, DEPS_MARKER))) {
   console.error(`npm install 后仍缺 ${DEPS_MARKER}`);
   process.exit(1);
 }
+
+installNativeHost(process.execPath);
+console.log(`native messaging host 已注册 → ${manifestPath()}`);
+console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
 
 const init = spawnSync(process.execPath, [path.join(DEST, "bin", "init.js")], {
   stdio: "inherit",

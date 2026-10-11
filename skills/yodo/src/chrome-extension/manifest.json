@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "yodo",
+  "version": "0.1.0",
+  "description": "yodo 的 Chrome 连接扩展：让 yodo 只操作它自己打开的标签页。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5e9VgWVB2hXzYR7c1LNAOaTlyeLnavcG0g2t3TlhG1+M/Kt5mO8vaKgOgjjxiH++ecRQXEGOcB/81n9qKnpJKozvyc2L2oD1V+3OQ2zPBMNskP14bV+Zk9VjTX9rp2TOk0oDcxp8dSStDk8JtJC5Ng41lU45C4OkHHswoaxG7hWmJjhvMdxdwhmFpq+GxccAPEsvFFOssomF4g+p4+5Q/bN9Q1z2a++lLnAcLnLbEKX52GxrSLzcaJfR5CG1Dbs99iqAi6jKoZFqxSAZxTCaqA4GFBdzt7p0VP7ggVF1ZECxGLdQ5+ENjH/ndI96m3DQ97kNVruWfK3/vr73Cu8OawIDAQAB",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "nativeMessaging",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

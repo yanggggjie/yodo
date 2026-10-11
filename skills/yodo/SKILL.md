@@ -111,9 +111,7 @@ flowchart TD
 
 | stdout | 处理 |
 |---|---|
-| `need-install` / `need-chrome` / `need-allow` | 将 `guide` 原样告诉用户，等待“好了”，随后重跑同一命令；不轮询、不改写 `guide`。 |
-| `need-remote-debugging` | 将 `guide` 原样告诉用户，等待用户确认后重跑同一命令。 |
-| `need-file-access` | 将 `guide` 原样告诉用户，说明 yodo 只需读取 Chrome 的 `DevToolsActivePort` 来取得 WebSocket endpoint；等待用户打开权限后重跑同一命令。 |
+| `need-install` / `need-chrome` / `need-extension` | 将 `guide` 原样告诉用户，等待“好了”，随后重跑同一命令；不轮询、不改写 `guide`。 |
 | 只有 `error`，没有 `status` | 命令未正常启动；停止并说明错误。 |
 | `status: success` | 使用 `result`；有 `resultFile` 时先读取文件。 |
 | `status: failure` | 按 `capability` 或 `candidate` 的规则处理。 |
@@ -408,7 +406,7 @@ await yodo.run(async ({ page }) => {
 - `select(page, selector, value)`
 - `evaluate(page, fn, ...args)` 读取当前页面 DOM、判断状态或完成其它必要操作
 
-DOM click、fill、press 和 scroll 通过 CDP `Input` 执行；`querySelector` 用于定位、读取状态、计算坐标和验证结果。`goto` 与 `waitForSelector` 默认 timeout 为 30s。
+DOM `click`、`fill`、`press` 和 `scroll` 在页面内直接操作元素：`element.click()`、写入 value 并派发 `input`、派发 `KeyboardEvent`、`scrollBy`。`querySelector` 用于定位和读取状态。这些事件的 `isTrusted` 为 false，没有 `pointerdown`、坐标或按坐标放置的光标；`press` 不会触发浏览器的默认按键行为。滑块、靠坐标定位的菜单，以及自有文档的编辑器，不要用这些 helper，在 task 里 `evaluate` 调用页面自己的接口。`goto` 与 `waitForSelector` 默认 timeout 为 30s。
 
 ### 8.3 运行和验证 DOM `candidate`
 
