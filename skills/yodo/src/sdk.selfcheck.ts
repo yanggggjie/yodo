@@ -21,10 +21,10 @@ const server = net.createServer((socket) => {
       let result: unknown = {};
       if (request.method === "ping") result = { pid: process.pid, chrome: "mock", pages: 1, record: null };
       if (request.method === "run.begin") result = { pageId: "P1" };
-      if (request.method === "cdp.send") result = { result: { value: "ok" } };
-      if (request.method === "cdp.subscribe") {
-        socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
-        socket.write(`${JSON.stringify({ jsonrpc: "2.0", method: "cdp.event", params: { subscriptionId: request.params.subscriptionId, event: request.params.event, value: { timestamp: 1 } } })}\n`);
+      if (request.method === "cdp.send") {
+        socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { result: { value: "ok" } } })}\n`);
+        // 页面事件由 holder 推送，按 pageId 与 method 分发
+        socket.write(`${JSON.stringify({ jsonrpc: "2.0", method: "cdp.event", params: { sessionId: "P1", method: "Page.loadEventFired", params: {} } })}\n`);
         continue;
       }
       socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
@@ -37,9 +37,8 @@ const { yodo } = await import("./sdk.ts");
 const output: string[] = []; const original = console.log; console.log = (...args) => output.push(args.map(String).join(" "));
 process.argv[1] = path.join(TEST_HOME, "faketask.js");
 try {
-  await yodo.run(async ({ page, _cdp }) => {
+  await yodo.run(async ({ page }) => {
     assert.equal(page._targetId, "P1");
-    assert.ok(_cdp.connection && _cdp.browser);
     const event = page.cdp.once("Page.loadEventFired");
     await page.cdp.send("Runtime.evaluate", { expression: "1" });
     await event;
@@ -48,5 +47,5 @@ try {
 } finally { console.log = original; server.close(); fs.rmSync(TEST_HOME, { recursive: true, force: true }); }
 
 assert.equal(JSON.parse(output.join("\n")).status, "success");
-assert.deepEqual(seen, ["ping", "run.begin", "cdp.subscribe", "cdp.send", "cdp.unsubscribe", "run.end"]);
+assert.deepEqual(seen, ["ping", "run.begin", "cdp.send", "run.end"]);
 console.log("sdk selfcheck ok");

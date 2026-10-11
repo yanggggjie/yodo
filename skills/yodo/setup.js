@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
 import { stopCurrentHolder } from "./src/cli/spawn.ts";
+import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
+import { ensureHomeLayout } from "./src/store/layout.ts";
 import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
 
 const major = Number(process.versions.node.split(".")[0]);
@@ -57,7 +59,11 @@ installNativeHost(process.execPath);
 console.log(`native messaging host 已注册 → ${manifestPath()}`);
 console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
 
-const init = spawnSync(process.execPath, [path.join(DEST, "bin", "init.js")], {
+ensureHomeLayout();
+writeShim(process.execPath);
+console.log(`yodo 命令 shim → ${BIN_DIR}`);
+
+const doctor = spawnSync(process.execPath, [path.join(DEST, "cli", "yodo.ts"), "doctor"], {
   stdio: "inherit",
 });
-process.exit(init.status ?? 0);
+process.exit(doctor.status ?? 0);

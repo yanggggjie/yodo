@@ -1,12 +1,12 @@
 import * as net from "node:net";
 import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js";
 import { SESSION_SOCK } from "./utils/constants.ts";
-import type { CdpScope, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RpcMessage, RpcMethod } from "./protocol.ts";
+import type { JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RpcMessage, RpcMethod } from "./protocol.ts";
 import { ensureHolder } from "./cli/spawn.ts";
 import { captureConsole, runFailureJson, runSuccessJson } from "./run-report.ts";
 
 type Listener<E extends keyof ProtocolMapping.Events> = (...params: ProtocolMapping.Events[E]) => void;
-type Subscription = { listener: (...params: never[]) => void; scope: CdpScope; event: string };
+type PageListener = { event: string; pageId: string; fn: (params: unknown) => void };
 
 class RpcError extends Error {
   readonly code: number;
@@ -14,11 +14,12 @@ class RpcError extends Error {
   constructor(code: number, message: string, data?: unknown) { super(message); this.name = "RpcError"; this.code = code; this.data = data; }
 }
 
+/** 一条 socket 连接承载整个 run。页面事件由 holder 推送，这里按 method 与 pageId 分发给 task 的监听函数。 */
 class RpcPeer {
   private buffer = "";
   private closed = false;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-  private subscriptions = new Map<string, Subscription>();
+  private listeners = new Set<PageListener>();
   private socket: net.Socket;
   private constructor(socket: net.Socket) {
     this.socket = socket;
@@ -49,10 +50,14 @@ class RpcPeer {
         else pending.resolve(message.result);
         continue;
       }
-      const notification = message as JsonRpcNotification;
-      const sub = this.subscriptions.get(notification.params.subscriptionId);
-      if (!sub) continue;
-      try { sub.listener(notification.params.value as never); } catch (error) { queueMicrotask(() => { throw error; }); }
+      this.dispatch(message as JsonRpcNotification);
+    }
+  }
+  private dispatch(notification: JsonRpcNotification): void {
+    const { sessionId, method, params } = notification.params;
+    for (const listener of [...this.listeners]) {
+      if (listener.pageId !== sessionId || listener.event !== method) continue;
+      try { listener.fn(params); } catch (error) { queueMicrotask(() => { throw error; }); }
     }
   }
   request(method: RpcMethod, params?: Record<string, unknown>): Promise<unknown> {
@@ -64,46 +69,46 @@ class RpcPeer {
       this.socket.write(`${JSON.stringify(request)}\n`);
     });
   }
-  addSubscription(id: string, subscription: Subscription): void { this.subscriptions.set(id, subscription); }
-  deleteSubscription(id: string): void { this.subscriptions.delete(id); }
-  private rejectAll(error: Error): void { for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); this.subscriptions.clear(); }
+  addListener(listener: PageListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+  private rejectAll(error: Error): void { for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); this.listeners.clear(); }
   close(error = new Error("holder 连接已关闭")): void { if (this.closed) return; this.closed = true; this.rejectAll(error); this.socket.end(); }
 }
 
 export interface CdpSession {
   send<M extends keyof ProtocolMapping.Commands>(method: M, ...params: ProtocolMapping.Commands[M]["paramsType"]): Promise<ProtocolMapping.Commands[M]["returnType"]>;
-  on<E extends keyof ProtocolMapping.Events>(event: E, listener: Listener<E>): Promise<() => Promise<void>>;
+  on<E extends keyof ProtocolMapping.Events>(event: E, listener: Listener<E>): () => void;
   once<E extends keyof ProtocolMapping.Events>(event: E, options?: { timeout?: number }): Promise<ProtocolMapping.Events[E][0]>;
 }
 
-function cdpSession(peer: RpcPeer, scope: CdpScope): CdpSession {
+function cdpSession(peer: RpcPeer, pageId: string): CdpSession {
   return {
-    async send(method, ...params) { return await peer.request("cdp.send", { scope, method, params: params[0] ?? {} }) as never; },
-    async on(event, listener) {
-      const subscriptionId = crypto.randomUUID();
-      peer.addSubscription(subscriptionId, { scope, event, listener: listener as (...params: never[]) => void });
-      try { await peer.request("cdp.subscribe", { subscriptionId, scope, event }); }
-      catch (error) { peer.deleteSubscription(subscriptionId); throw error; }
-      let active = true;
-      return async () => { if (!active) return; active = false; peer.deleteSubscription(subscriptionId); await peer.request("cdp.unsubscribe", { subscriptionId }); };
+    async send(method, ...params) {
+      return await peer.request("cdp.send", { pageId, method, params: params[0] ?? {} }) as never;
     },
-    async once(event, options) {
-      return await new Promise(async (resolve, reject) => {
+    on(event, listener) {
+      return peer.addListener({ event: String(event), pageId, fn: (params) => (listener as (...args: unknown[]) => void)(params) });
+    },
+    once(event, options) {
+      return new Promise((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const subscriptionId = crypto.randomUUID();
-        let settled = false;
-        const unsubscribe = async (): Promise<void> => { peer.deleteSubscription(subscriptionId); await peer.request("cdp.unsubscribe", { subscriptionId }); };
-        peer.addSubscription(subscriptionId, { scope, event, listener: ((value: ProtocolMapping.Events[typeof event][0]) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); void unsubscribe().then(() => resolve(value), reject); }) as (...params: never[]) => void });
-        try { await peer.request("cdp.subscribe", { subscriptionId, scope, event }); }
-        catch (error) { peer.deleteSubscription(subscriptionId); reject(error); return; }
-        if (options?.timeout != null) timer = setTimeout(() => { if (settled) return; settled = true; void unsubscribe().then(() => reject(new Error(`${String(event)} timeout ${options.timeout}ms`)), reject); }, options.timeout);
+        const off = peer.addListener({
+          event: String(event),
+          pageId,
+          fn: (params) => { off(); if (timer) clearTimeout(timer); resolve(params as never); },
+        });
+        if (options?.timeout != null) {
+          timer = setTimeout(() => { off(); reject(new Error(`${String(event)} timeout ${options.timeout}ms`)); }, options.timeout);
+        }
       });
     },
   };
 }
 
 export type PageHandle = { readonly _targetId: string; readonly cdp: CdpSession };
-export type TaskFn = (api: { page: PageHandle; _cdp: { connection: CdpSession; browser: CdpSession } }) => Promise<unknown> | unknown;
+export type TaskFn = (api: { page: PageHandle }) => Promise<unknown> | unknown;
 
 function assertNode24(): void { const major = Number(process.versions.node.split(".")[0]); if (!Number.isFinite(major) || major < 24) throw new Error(`yodo 需要 Node >=24，当前 ${process.version}`); }
 
@@ -118,9 +123,9 @@ export const yodo = {
       if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(JSON.stringify({ status, guide: blocked.message }, null, 2)); return; }
       peer = await RpcPeer.open();
       const begun = await peer.request("run.begin") as { pageId: string };
-      const page: PageHandle = { _targetId: begun.pageId, cdp: cdpSession(peer, { type: "page", pageId: begun.pageId }) };
+      const page: PageHandle = { _targetId: begun.pageId, cdp: cdpSession(peer, begun.pageId) };
       const logs: string[] = []; restore = captureConsole(logs);
-      const result = await fn({ page, _cdp: { connection: cdpSession(peer, { type: "connection" }), browser: cdpSession(peer, { type: "browser" }) } });
+      const result = await fn({ page });
       restore(); restore = undefined;
       console.log(runSuccessJson(scriptAbs, result));
     } catch (error) {

@@ -1,14 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ACTIVE_RECORD_DIR, RECORD_DIR, RECORD_MAX_MS } from "../utils/constants.ts";
+import { RECORDING_DIR, RECORD_DIR, RECORD_MAX_MS } from "../utils/constants.ts";
 import { createLogger } from "../utils/logger.ts";
 import { ensureHomeLayout } from "../store/layout.ts";
-import {
-  claimActive,
-  createRecordName,
-  releaseActive,
-  sweepDeadActive,
-} from "../store/repository.ts";
+import { createRecordName } from "../store/repository.ts";
 import type { CdpBrowser, CdpContext, RawCdpConnection } from "../browser/index.ts";
 import {
   ActiveRecordStore,
@@ -26,7 +21,7 @@ import {
   formatStopStdout,
   writeArtifacts,
 } from "./write.ts";
-import { DomRecordStore, writeDomTimeline } from "./dom.ts";
+import { DomRecordStore } from "./dom.ts";
 
 const logger = createLogger("record");
 
@@ -36,7 +31,6 @@ let domStore: DomRecordStore | null = null;
 let active: ActiveRecordStore | null = null;
 let windowTracker: RecordWindowTracker | null = null;
 let recordRaw: RawCdpConnection | null = null;
-let recordContext: CdpContext | null = null;
 let maxTimer: ReturnType<typeof setTimeout> | null = null;
 let finishing: Promise<string> | null = null;
 let adblockEngine: Awaited<ReturnType<typeof loadAdblockEngine>> | undefined;
@@ -73,23 +67,21 @@ export async function startRecord(
 ): Promise<string> {
   if (active) throw new Error(`record ${active.name} 仍在进行`);
   ensureHomeLayout();
-  await sweepDeadActive();
   let name = "";
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = createRecordName(options.name);
-    if (!fs.existsSync(path.join(RECORD_DIR, candidate)) && !fs.existsSync(path.join(ACTIVE_RECORD_DIR, candidate))) {
+    if (!fs.existsSync(path.join(RECORD_DIR, candidate))) {
       name = candidate;
       break;
     }
   }
   if (!name) throw new Error("无法生成唯一 record name");
-  await claimActive(name);
-  const recordDir = path.join(ACTIVE_RECORD_DIR, name);
+  const recordDir = path.join(RECORDING_DIR, name);
+  fs.mkdirSync(recordDir, { recursive: true });
   active = new ActiveRecordStore(name, Date.now(), recordDir);
   const tracker = new RecordWindowTracker();
   windowTracker = tracker;
   recordRaw = browser.raw;
-  recordContext = context;
 
   try {
     const raw = browser.raw;
@@ -122,13 +114,10 @@ export async function startRecord(
   } catch (error) {
     await stopRecorders().catch(() => {});
     await closeRecordWindows().catch(() => {});
-    await context.setIgnoreCertErrors(false).catch(() => {});
-    await releaseActive(name).catch(() => {});
     clearMaxTimer();
     active = null;
     windowTracker = null;
     recordRaw = null;
-    recordContext = null;
     throw error;
   }
 }
@@ -139,24 +128,20 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
   clearMaxTimer();
   try {
     if (reason !== "abort" && domStore) {
-      await networkRecorder?.captureFinalStates(domStore).catch(() => {});
     }
     await stopRecorders();
     domStore?.deactivate();
     await closeRecordWindows();
-    if (recordContext) await recordContext.setIgnoreCertErrors(false);
   } finally {
     current.deactivate();
     active = null;
     windowTracker = null;
     recordRaw = null;
-    recordContext = null;
   }
 
   if (reason === "abort") {
     current.events.length = 0;
     domStore = null;
-    await releaseActive(current.name);
     logger.info(`aborted ${current.name}`);
     return JSON.stringify({ status: "aborted", name: current.name }, null, 2);
   }
@@ -166,11 +151,9 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
     logger.info(`pipeline ${current.events.length} → ${processed.length}`);
     const domEvents = domStore?.events ?? [];
     const flushResult = await writeArtifacts(current.recordDir, processed, domEvents, current.name);
-    await writeDomTimeline(current.recordDir, domEvents);
     const finalDir = path.join(RECORD_DIR, current.name);
     if (fs.existsSync(finalDir)) throw new Error(`record 已存在：${current.name}`);
     fs.renameSync(current.recordDir, finalDir);
-    await releaseActive(current.name);
     flushResult.recordDir = finalDir;
     logger.info(`archived ${current.name}`);
     current.events.length = 0;
@@ -178,7 +161,6 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
     return formatStopStdout(flushResult);
   } catch (error) {
     if (reason === "disconnect") {
-      await releaseActive(current.name).catch(() => {});
       logger.warn(`disconnect flush failed for ${current.name}`, error);
       return JSON.stringify(
         { status: "aborted", name: current.name },

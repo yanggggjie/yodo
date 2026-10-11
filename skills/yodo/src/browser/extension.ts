@@ -37,6 +37,7 @@ export class ExtensionLink {
   private closed = false;
   private pending = new Map<number, Pending>();
   private listeners = new Map<string, Set<Handler>>();
+  private anyListeners = new Set<(method: string, params: unknown, sessionId?: string) => void>();
   private closeHandlers = new Set<() => void>();
   private commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
   private rpc: { id: string; op: string } | undefined;
@@ -148,7 +149,16 @@ export class ExtensionLink {
     }
   }
 
+  /** 接收所有页面事件（holder 用它把事件转给当前 run 的 client）。 */
+  onAny(handler: (method: string, params: unknown, sessionId?: string) => void): () => void {
+    this.anyListeners.add(handler);
+    return () => this.anyListeners.delete(handler);
+  }
+
   private emit(method: string, params: unknown, sessionId?: string): void {
+    for (const handler of this.anyListeners) {
+      try { handler(method, params, sessionId); } catch { /* 单个订阅者出错不影响其它 */ }
+    }
     const handlers = this.listeners.get(method);
     if (!handlers) return;
     for (const handler of handlers) {

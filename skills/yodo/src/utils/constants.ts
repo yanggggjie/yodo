@@ -5,10 +5,10 @@ import * as path from "node:path";
 /** 本机数据根目录（写死，无 env 覆盖）。 */
 export const YODO_HOME = path.join(os.homedir(), ".yodo");
 export const TASK_DIR = path.join(YODO_HOME, "task");
-export const TEMP_DIR = path.join(YODO_HOME, "temp");
 export const RECORD_DIR = path.join(YODO_HOME, "record");
-export const ACTIVE_RECORD_DIR = path.join(RECORD_DIR, ".active");
 export const SESSION_DIR = path.join(YODO_HOME, "session");
+/** 进行中的录制目录；stop 时移入 RECORD_DIR，holder 启动时清理残留。 */
+export const RECORDING_DIR = path.join(SESSION_DIR, "recording");
 /** posix 用文件 socket；win32 用 named pipe（不是 fs 文件）。 */
 export const SESSION_SOCK_IS_FILE = process.platform !== "win32";
 export const SESSION_SOCK = SESSION_SOCK_IS_FILE

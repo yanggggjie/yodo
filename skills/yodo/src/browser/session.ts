@@ -322,7 +322,7 @@ export class CdpContext {
   private pagesMap = new Map<string, CdpPage>();
   private runWindowId: number | null = null;
   private runAnchorId: string | null = null;
-  private ignoreCertErrors = false;
+  private runTabId: string | null = null;
 
   constructor(raw: RawCdpConnection) {
     this.raw = raw;
@@ -338,16 +338,9 @@ export class CdpContext {
     });
   }
 
+  /** 锚点 tab 保留，不参与 detach；它保证 run 窗存活。 */
   runKeepIds(): Set<string> {
     return this.runAnchorId ? new Set([this.runAnchorId]) : new Set();
-  }
-
-  async openRunWindow(): Promise<CdpPage> {
-    if (!(await this.runWindowAlive())) {
-      this.forgetRunMeta();
-      return await this.createRunWindow();
-    }
-    return await this.ensureAnchor();
   }
 
   async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
@@ -363,34 +356,43 @@ export class CdpContext {
     }
   }
 
-  /** 这一次 run 结束：tab 回到 about:blank，标题改回 `yodo run`。不关窗。 */
-  async endRunTabs(): Promise<void> {
-    if (this.runWindowId == null) return;
-    if (!(await this.runWindowAlive())) {
-      this.forgetRunMeta();
-      return;
+  /** run 窗：不存在或已被用户关闭时静默重建，锚点 tab 标题为 yodo run。 */
+  private async ensureRunWindow(): Promise<number> {
+    if (this.runWindowId != null && this.runAnchorId != null) {
+      if ((await this.windowIdOf(this.runAnchorId)) === this.runWindowId) return this.runWindowId;
     }
-    const inWin = await this.targetsInRunWindow();
-    for (const id of inWin) {
-      if (id === this.runAnchorId) continue;
-      await this.raw.ops.closeTab(Number(id)).catch(() => {});
-      this.forgetPage(id);
-    }
-    try {
-      const page = await this.ensureAnchor();
-      await page.goto("about:blank");
-      await this.setTabTitle(page, RUN_WINDOW_TITLE);
-    } catch {
-      this.forgetRunMeta();
-    }
+    this.forgetRunMeta();
+    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false });
+    const anchor = await this.attachTarget(String(tabId));
+    await anchor.evaluate(`document.title = ${JSON.stringify(RUN_WINDOW_TITLE)}`);
+    this.runWindowId = windowId;
+    this.runAnchorId = anchor.targetId;
+    return windowId;
   }
 
-  /** holder 停：整扇 run 窗关掉。 */
+  /** 每次 run 都新开一个 tab，不复用。 */
+  async newPage(): Promise<CdpPage> {
+    const windowId = await this.ensureRunWindow();
+    const { tabId } = await this.raw.ops.openTab({ windowId, url: "about:blank", active: true });
+    this.runTabId = String(tabId);
+    return await this.attachTarget(String(tabId));
+  }
+
+  /** run 结束：关闭本次 run 的 tab；锚点保留。 */
+  async endRunTab(): Promise<void> {
+    const id = this.runTabId;
+    if (id == null) return;
+    this.runTabId = null;
+    this.forgetPage(id);
+    await this.raw.ops.detach(Number(id)).catch(() => {});
+    await this.raw.ops.closeTab(Number(id)).catch(() => {});
+  }
+
+  /** holder 停：关掉整扇 run 窗。 */
   async closeRunWindow(): Promise<void> {
-    const ids = new Set(await this.targetsInRunWindow());
-    if (this.runAnchorId) ids.add(this.runAnchorId);
+    const windowId = this.runWindowId;
     this.forgetRunMeta();
-    await closeTargetsKeepChrome(this.raw, ids);
+    if (windowId != null) await this.raw.ops.closeWindow(windowId).catch(() => {});
     await this.detachAllPages();
   }
 
@@ -411,20 +413,6 @@ export class CdpContext {
     );
   }
 
-  /** 证书错误忽略：对所有已附加的 tab 生效，之后新附加的 tab 也生效。 */
-  async setIgnoreCertErrors(ignore: boolean): Promise<void> {
-    this.ignoreCertErrors = ignore;
-    await Promise.all(
-      this.pages().map((page) =>
-        this.raw.send("Security.setIgnoreCertificateErrors", { ignore }, page.sessionId).catch((err) => {
-          logger.warn("setIgnoreCertificateErrors failed", {
-            err: err instanceof Error ? err.message : String(err),
-          });
-        }),
-      ),
-    );
-  }
-
   private forgetPage(targetId: string): void {
     const page = this.pagesMap.get(targetId);
     if (page) {
@@ -432,11 +420,13 @@ export class CdpContext {
       this.pagesMap.delete(targetId);
     }
     if (targetId === this.runAnchorId) this.runAnchorId = null;
+    if (targetId === this.runTabId) this.runTabId = null;
   }
 
   private forgetRunMeta(): void {
     this.runWindowId = null;
     this.runAnchorId = null;
+    this.runTabId = null;
   }
 
   private async windowIdOf(targetId: string): Promise<number | undefined> {
@@ -447,81 +437,12 @@ export class CdpContext {
     }
   }
 
-  private async targetsInRunWindow(): Promise<string[]> {
-    if (this.runWindowId == null) return [];
-    try {
-      return (await ownedPages(this.raw))
-        .filter((t) => t.windowId === this.runWindowId)
-        .map((t) => t.targetId);
-    } catch {
-      return [];
-    }
-  }
-
-  private async runWindowAlive(): Promise<boolean> {
-    if (this.runWindowId == null) return false;
-    if (this.runAnchorId != null) {
-      if ((await this.windowIdOf(this.runAnchorId)) === this.runWindowId) return true;
-    }
-    return (await this.targetsInRunWindow()).length > 0;
-  }
-
-  private async setTabTitle(page: CdpPage, title: string): Promise<void> {
-    await page.evaluate(`document.title = ${JSON.stringify(title)}`);
-  }
-
-  private async createRunWindow(): Promise<CdpPage> {
-    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false });
-    const page = await this.attachTarget(String(tabId));
-    this.runWindowId = windowId;
-    this.runAnchorId = page.targetId;
-    await this.setTabTitle(page, RUN_WINDOW_TITLE);
-    return page;
-  }
-
-  private async ensureAnchor(): Promise<CdpPage> {
-    if (this.runWindowId == null) return await this.createRunWindow();
-    if (this.runAnchorId) {
-      const existing = this.pagesMap.get(this.runAnchorId);
-      if (existing && !existing.isClosed()) {
-        if ((await this.windowIdOf(existing.targetId)) === this.runWindowId) {
-          await this.setTabTitle(existing, RUN_WINDOW_TITLE).catch(() => {});
-          return existing;
-        }
-      }
-    }
-    if (this.runAnchorId) {
-      const w = await this.windowIdOf(this.runAnchorId);
-      if (w === this.runWindowId) {
-        const page = await this.attachTarget(this.runAnchorId);
-        await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
-        return page;
-      }
-    }
-    const inWin = await this.targetsInRunWindow();
-    const reuse = inWin[0];
-    if (reuse) {
-      const page = await this.attachTarget(reuse);
-      this.runAnchorId = page.targetId;
-      await page.goto("about:blank").catch(() => {});
-      await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
-      return page;
-    }
-    this.forgetRunMeta();
-    return await this.createRunWindow();
-  }
-
   private async attachTarget(targetId: string, url = "about:blank"): Promise<CdpPage> {
     const existing = this.pagesMap.get(targetId);
     if (existing && !existing.isClosed()) return existing;
     await this.raw.ops.attach(Number(targetId));
     const page = new CdpPage(this.raw, targetId, targetId, url);
     this.pagesMap.set(targetId, page);
-    if (this.ignoreCertErrors) {
-      await this.raw
-        .send("Security.setIgnoreCertificateErrors", { ignore: true }, targetId)
-        .catch(() => {});
-    }
     await page.initPage();
     return page;
   }
@@ -532,12 +453,6 @@ export class CdpContext {
 
   getPage(targetId: string): CdpPage | undefined {
     return this.pagesMap.get(targetId);
-  }
-
-  async newPage(): Promise<CdpPage> {
-    const page = await this.openRunWindow();
-    await page.goto("about:blank");
-    return page;
   }
 }
 

@@ -1,9 +1,9 @@
 export type HandshakeStatus = "need-install" | "need-chrome" | "need-extension";
 export type StdoutStatus = HandshakeStatus | "recording" | "stopped" | "aborted" | "idle" | "success" | "failure";
-export type CdpScope = { type: "connection" } | { type: "browser" } | { type: "page"; pageId: string };
-export type RpcMethod = "ping" | "run.begin" | "run.end" | "cdp.send" | "cdp.subscribe" | "cdp.unsubscribe" | "record.start" | "record.stop" | "record.abort";
+export type RpcMethod = "ping" | "run.begin" | "run.end" | "cdp.send" | "record.start" | "record.stop" | "record.abort";
 export type JsonRpcRequest = { jsonrpc: "2.0"; id: string; method: RpcMethod; params?: Record<string, unknown> };
-export type JsonRpcNotification = { jsonrpc: "2.0"; method: "cdp.event"; params: { subscriptionId: string; event: string; value: unknown } };
+/** 页面事件推送：sessionId 即 pageId（tab 的字符串形式）。 */
+export type JsonRpcNotification = { jsonrpc: "2.0"; method: "cdp.event"; params: { sessionId: string; method: string; params: unknown } };
 export type JsonRpcError = { code: number; message: string; data?: unknown };
 export type JsonRpcResponse = { jsonrpc: "2.0"; id: string; result: unknown } | { jsonrpc: "2.0"; id: string; error: JsonRpcError };
 export type RpcMessage = JsonRpcResponse | JsonRpcNotification;

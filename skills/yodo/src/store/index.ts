@@ -1,8 +1,2 @@
 export { ensureHomeLayout } from "./layout.ts";
-export {
-  claimActive,
-  hasLiveActive,
-  releaseActive,
-  sweepDeadActive,
-  validateRecordName,
-} from "./repository.ts";
+export { validateRecordName, createRecordName } from "./repository.ts";

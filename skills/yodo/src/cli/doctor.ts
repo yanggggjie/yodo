@@ -4,7 +4,6 @@ import {
   RECORD_DIR,
   SESSION_DIR,
   TASK_DIR,
-  TEMP_DIR,
   YODO_HOME,
 } from "../utils/constants.ts";
 import { isPidAlive, readSessionPid } from "./spawn.ts";
@@ -40,7 +39,6 @@ export function handleDoctor(): void {
 
   for (const [name, dir] of [
     ["task", TASK_DIR],
-    ["temp", TEMP_DIR],
     ["record", RECORD_DIR],
     ["session", SESSION_DIR],
   ] as const) {

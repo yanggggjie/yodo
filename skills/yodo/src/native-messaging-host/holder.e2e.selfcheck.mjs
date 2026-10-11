@@ -65,6 +65,7 @@ function fakeExtension(child) {
 /** 一条长连接承载整个会话（run 状态绑定在连接上）。 */
 let conn = null;
 const pending = new Map();
+const pushed = [];
 function connect() {
   return new Promise((resolve, reject) => {
     const sock = net.connect(SOCK);
@@ -77,6 +78,7 @@ function connect() {
       while ((nl = data.indexOf("\n")) >= 0) {
         const r = JSON.parse(data.slice(0, nl));
         data = data.slice(nl + 1);
+        if (!r.id && r.method === "cdp.event") { pushed.push(r.params); continue; }
         const p = pending.get(r.id);
         if (!p) continue;
         pending.delete(r.id);
@@ -117,16 +119,21 @@ const page = await rpc("run.begin");
 assert.ok(page.pageId, "run.begin 返回 pageId");
 console.log("run.begin ok, pageId=", page.pageId);
 
-const value = await rpc("cdp.send", { scope: { type: "page", pageId: page.pageId }, method: "Runtime.evaluate", params: { expression: "1+1", returnByValue: true } });
+// 页面事件推送：扩展上报的 tab 事件应按 pageId 推给当前 run
+child.stdin.write(frame({ type: "event", tabId: Number(page.pageId), method: "Page.loadEventFired", params: { timestamp: 1 } }));
+await waitFor(() => pushed.some((e) => e.sessionId === page.pageId && e.method === "Page.loadEventFired"));
+console.log("page event pushed ok");
+
+const value = await rpc("cdp.send", { pageId: page.pageId, method: "Runtime.evaluate", params: { expression: "1+1", returnByValue: true } });
 assert.equal(value.result.value, 2);
 console.log("page-level cdp ok");
 
 await assert.rejects(
-  rpc("cdp.send", { scope: { type: "connection" }, method: "Target.getTargets", params: {} }),
-  /browser 级 CDP 不可用|cdp.send/,
-  "browser 级命令应被拒绝",
+  rpc("cdp.send", { pageId: "nope", method: "Runtime.evaluate", params: {} }),
+  /page 不存在/,
+  "未知 page 应被拒绝",
 );
-console.log("browser-level refusal ok");
+console.log("unknown page refusal ok");
 
 await rpc("run.end");
 console.log("run.end ok");

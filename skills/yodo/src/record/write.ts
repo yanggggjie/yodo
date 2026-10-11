@@ -157,6 +157,7 @@ export function formatStopStdout(result: FlushResult): string {
       status: "stopped",
       name: result.name,
       recordDir: result.recordDir,
+      timeline: path.join(result.recordDir, "timeline.jsonl"),
     },
     null,
     2,

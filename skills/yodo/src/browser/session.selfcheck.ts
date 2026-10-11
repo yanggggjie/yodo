@@ -107,24 +107,27 @@ function fakeRaw(ops: TabOps, sent: Sent[]) {
   assert.ok(calls.includes("closeTab:100"));
 }
 
-// 2. run 窗：只开一扇窗，同一个 anchor tab 被复用；endRunTabs 不关窗；closeRunWindow 关 anchor
+// 2. run 窗：每次 run 新开 tab，结束关闭；锚点保留；窗口被关后静默重建
 {
   const { ops, tabs, calls } = fakeTabs();
   const sent: Sent[] = [];
   const { raw } = fakeRaw(ops, sent);
   const ctx = new CdpContext(raw);
-  const runPage = await ctx.openRunWindow();
+  const first = await ctx.newPage();
   assert.ok(calls.includes("openWindow:focused=false"));
   assert.ok(sent.some((s) => s.method === "Runtime.evaluate" && String(s.params?.expression ?? "").includes(RUN_WINDOW_TITLE)));
-  const work = await ctx.newPage();
-  assert.equal(work.targetId, runPage.targetId);
-  await ctx.openRunWindow();
-  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 1);
-  await ctx.endRunTabs();
-  assert.equal(tabs.size, 1, "endRunTabs 不关 anchor tab");
+  await ctx.endRunTab();
+  assert.ok(calls.includes(`closeTab:${first.targetId}`), "run 结束关闭本次 tab");
+  assert.equal(tabs.size, 1, "只剩锚点 tab");
+  const second = await ctx.newPage();
+  assert.notEqual(second.targetId, first.targetId, "每次 run 都是新 tab");
+  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 1, "run 窗只创建一次");
+  await ctx.endRunTab();
   await ctx.closeRunWindow();
-  assert.ok(calls.includes(`closeTab:${runPage.targetId}`), "closeRunWindow 关掉 anchor tab");
-  assert.equal(tabs.size, 1, "没有其它窗口时保留一扇后台空白窗，避免 Chrome 退出");
+  assert.equal(tabs.size, 0, "holder 退出时关掉整扇 run 窗");
+  const third = await ctx.newPage();
+  assert.ok(third.targetId, "窗口被关后静默重建");
+  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 2);
 }
 
 // 3. 录制窗：focused=true，窗口 id 直接来自 openWindow
@@ -140,30 +143,17 @@ function fakeRaw(ops: TabOps, sent: Sent[]) {
   assert.ok(!sent.some((s) => s.method === "Page.bringToFront"));
 }
 
-// 4. 证书忽略：对已附加 tab 生效，之后新附加的 tab 也生效
-{
-  const { ops } = fakeTabs();
-  const sent: Sent[] = [];
-  const { raw } = fakeRaw(ops, sent);
-  const ctx = new CdpContext(raw);
-  const page = await ctx.openRunWindow();
-  await ctx.setIgnoreCertErrors(true);
-  assert.ok(sent.some((s) => s.method === "Security.setIgnoreCertificateErrors" && s.sessionId === page.sessionId && s.params?.ignore === true));
-  const rec = await ctx.openRecordWindow();
-  assert.ok(sent.some((s) => s.method === "Security.setIgnoreCertificateErrors" && s.sessionId === rec.page.sessionId));
-}
-
 // 5. tab.removed 事件：页面被标记关闭，不再出现在 pages() 里
 {
   const { ops } = fakeTabs();
   const sent: Sent[] = [];
   const { raw, emit } = fakeRaw(ops, sent);
   const ctx = new CdpContext(raw);
-  const page = await ctx.openRunWindow();
-  assert.equal(ctx.pages().length, 1);
+  const page = await ctx.newPage();
+  assert.equal(ctx.pages().length, 2, "锚点 tab 与本次 tab");
   emit("tab.removed", { tabId: Number(page.targetId) });
   assert.equal(page.isClosed(), true);
-  assert.equal(ctx.pages().length, 0);
+  assert.equal(ctx.pages().length, 1, "只剩锚点");
 }
 
 console.log("browser session selfcheck ok");

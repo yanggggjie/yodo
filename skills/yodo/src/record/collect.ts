@@ -272,18 +272,6 @@ export const GESTURE_INJECT_SOURCE = `(() => {
       send({ kind: "change", frameUrl: location.href, role, name, startedAt: Date.now() }, target, { ...fieldValue(target), ...(target instanceof HTMLInputElement && /^(checkbox|radio)$/.test(target.type) ? { checked: target.checked } : {}), ...(target instanceof HTMLSelectElement ? { selectedText: target.selectedOptions[0]?.textContent?.trim().slice(0, 200) || "" } : {}) });
     }
   }, true);
-  document.addEventListener("submit", (e) => {
-    if (!e.isTrusted) return;
-    const { role, name } = roleName(e.target);
-    send({ kind: "submit", frameUrl: location.href, role, name, startedAt: Date.now() }, e.target);
-  }, true);
-  document.addEventListener("keydown", (e) => {
-    const allowed = ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "];
-    if (e.isTrusted && (allowed.includes(e.key) || e.altKey || e.ctrlKey || e.metaKey)) {
-      const { role, name } = roleName(e.target);
-      send({ kind: "keydown", frameUrl: location.href, role, name, startedAt: Date.now(), key: e.key, code: e.code, modifiers: { alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey } }, e.target);
-    }
-  }, true);
   const scrolls = new Map();
   document.addEventListener("scroll", (e) => {
     const target = e.target === document ? document.scrollingElement : e.target;
@@ -354,11 +342,6 @@ export function startInjectEvents(
       domStore?.append(targetId, { t: startedAt, type: "click", url: frameUrl, frameUrl, mainFrame: row.mainFrame !== false, role: row.role, name: row.name, target: row.target, ancestors: row.ancestors, children: row.children, childrenTruncated: row.childrenTruncated });
     } else if (row.kind === "fill" || row.kind === "change") {
       domStore?.append(targetId, { t: startedAt, type: row.kind, url: frameUrl, frameUrl, mainFrame: row.mainFrame !== false, role: row.role, name: row.name, target: row.target, ancestors: row.ancestors, children: row.children, childrenTruncated: row.childrenTruncated, value: row.value, valueRedacted: row.valueRedacted, checked: row.checked, selectedText: row.selectedText });
-    } else if (row.kind === "submit") {
-      tracker.recordGesture(startedAt);
-      domStore?.append(targetId, { t: startedAt, type: "submit", url: frameUrl, frameUrl, mainFrame: row.mainFrame !== false, role: row.role, name: row.name, target: row.target, ancestors: row.ancestors, children: row.children, childrenTruncated: row.childrenTruncated });
-    } else if (row.kind === "keydown" && row.key) {
-      domStore?.append(targetId, { t: startedAt, type: "keydown", url: frameUrl, frameUrl, mainFrame: row.mainFrame !== false, role: row.role, name: row.name, target: row.target, ancestors: row.ancestors, children: row.children, childrenTruncated: row.childrenTruncated, key: row.key, code: row.code, modifiers: row.modifiers });
     } else if (row.kind === "scroll" && row.scroll) {
       domStore?.append(targetId, { t: startedAt, type: "scroll", url: frameUrl, frameUrl, mainFrame: row.mainFrame !== false, role: row.role, name: row.name, target: row.target, ancestors: row.ancestors, children: row.children, childrenTruncated: row.childrenTruncated, scroll: row.scroll });
     }
@@ -389,7 +372,6 @@ export function startInjectEvents(
 export type CdpNetworkRecorder = {
   sessionToTarget: Map<string, string>;
   attachTarget: (targetId: string) => Promise<void>;
-  captureFinalStates: (domStore: DomRecordStore) => Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -876,44 +858,6 @@ export async function startCdpNetworkRecorder(
   return {
     sessionToTarget,
     attachTarget: (targetId: string) => attachTarget(targetId),
-    captureFinalStates: async (domStore: DomRecordStore) => {
-      await Promise.all([...sessionsBySessionId.values()].map(async (ps) => {
-        if (!tracker.isKnownTarget(ps.targetId)) return;
-        const response = await raw.send("Runtime.evaluate", {
-          expression: `(() => {
-            const nodes = [...document.querySelectorAll('button,a[href],input,textarea,select,[role],[aria-label],[aria-pressed],[aria-selected]')].filter((el) => {
-              const r = el.getBoundingClientRect();
-              const s = getComputedStyle(el);
-              return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
-            }).slice(0, 100);
-            const attrs = ['name','type','role','aria-label','placeholder','title','alt','href','data-testid','data-test','data-qa','aria-pressed','aria-selected','disabled'];
-            const elements = nodes.map((el) => {
-              const attributes = {};
-              for (const key of attrs) if (el.hasAttribute(key)) attributes[key] = String(el.getAttribute(key) || '').slice(0, 500);
-              const classes = [...el.classList].slice(0, 30);
-              const tag = el.tagName.toLowerCase();
-              const selectors = [];
-              if (el.id) selectors.push('#' + (CSS.escape ? CSS.escape(el.id) : el.id));
-              if (el.getAttribute('aria-label')) selectors.push(tag + '[aria-label=' + JSON.stringify(el.getAttribute('aria-label')) + ']');
-              return { tag, ...(el.id ? { id: el.id } : {}), ...(classes.length ? { classes } : {}), ...(Object.keys(attributes).length ? { attributes } : {}), ...(selectors.length ? { selectors } : {}), ...(el instanceof HTMLInputElement ? { checked: el.checked } : {}) };
-            });
-            return { url: location.href, title: document.title, elements };
-          })()`,
-          returnByValue: true,
-        }, ps.sessionId) as { result?: { value?: { url?: string; title?: string; elements?: import("./types.ts").DomElement[] } } };
-        const value = response.result?.value;
-        if (!value) return;
-        domStore.append(ps.targetId, {
-          t: Date.now(),
-          type: "final-state",
-          url: value.url || ps.pageUrl,
-          frameUrl: value.url || ps.pageUrl,
-          mainFrame: true,
-          title: value.title || "",
-          elements: value.elements || [],
-        });
-      }));
-    },
     stop: async () => {
       stopping = true;
       const sessionIds = new Set([

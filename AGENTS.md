@@ -80,94 +80,60 @@ skills/yodo/
 
 ### 4.1 对外接口
 
-对外接口由三部分组成：
-
-| 组成 | 文件 | 职责 |
+| 组成 | 位置 | 职责 |
 |---|---|---|
-| Task SDK |- | 只向 task 暴露 `yodo.run()`，并在 client 进程运行 task 闭包 |
-| task lib | `~/.yodo/task/task-lib/` | 向 task 提供通用且有完整行为保证的 helper |
-| `task` |  `~/.yodo/task` | 使用 SDK 完成一个可独立执行和复用的流程 |
+| 命令入口 | `src/cli/yodo.ts`，由 `~/.yodo/bin/yodo` shim 调用 | `run`、`record`、`doctor` |
+| Task SDK | `src/sdk.ts` | 只向 task 暴露 `yodo.run({ page })`，在 client 进程运行 task 闭包 |
+| task-lib | `~/.yodo/task/lib/`，源码在 `src/templates/task-lib/` | 页面操作 helper、`toggle`、`expectRequest`、URL 工具 |
+| task | `~/.yodo/task/<name>.js` | 一个可独立执行和复用的流程，头部 `@status` 区分 `draft` 与 `verified` |
 
-修改 `capability` 时，不直接编辑 `~/.yodo/task` 中的文件。先复制到 `~/.yodo/temp` 作为 `candidate`，验证成功后再替换原文件；验证前必须保留原版本。
+修改 task 直接改 `~/.yodo/task` 中的文件，不再使用 `temp` 候选目录。草稿用 `@status: draft` 标记。
 
 ### 4.2 holder
 
-`src/holder.ts` 是常驻进程，持有唯一 CDP 连接以维持 Chrome 远程调试授权。实测连接数归零时授权失效，因此 holder 必须常驻。
+`src/holder.ts` 是 native messaging host，由 Chrome 拉起，持有扩展通道。stdin 关闭时保存录制并退出。
 
-holder 通过 socket 暴露运行生命周期、通用 CDP 和 record RPC：
+holder 通过 socket 提供：
 
 ```text
-run.begin
-run.end
-cdp.send
-cdp.subscribe
-cdp.unsubscribe
-record.*
+run.begin / run.end
+cdp.send        { pageId, method, params, timeoutMs? }
+cdp.event       （推送）{ sessionId, method, params }
+record.start / record.stop / record.abort
 ping
 ```
 
-同时只允许一个 `holder run`，并与发起它的 socket 绑定。连接断开（包括 client 崩溃）时，立即执行 `run.end` 清理。
+- 同一时间只允许一个 run，与发起它的 socket 绑定。连接断开时执行 `run.end` 清理。
+- 页面事件由 holder 按 `sessionId`（即 pageId）推送给当前 run 的 client，client 按 method 过滤。不再有 `cdp.subscribe` 与 scope。
+- 不暴露 browser 级 CDP 命令。`cdp.send` 只接受存在的 page。
 
-### 4.3 client
+### 4.3 扩展
 
-client 位于 `src/sdk.ts`。`yodo.run(fn)` 在当前 client 进程运行 task 闭包，并直接提供当前 task 独占的运行页面 `page`。`page.cdp` 通过 socket 委托 holder 执行页面级 CDP；高级 `_cdp.connection` 和 `_cdp.browser` 只用于 page scope 不足时的排障或能力探索。
+`src/chrome-extension/` 是薄层 CDP 代理，约 220 行。协议见 `src/browser/extension.ts`。
 
-task 常用导航、evaluate 和 DOM 操作从 `~/.yodo/task/lib/index.js` 导入。Task SDK 不公开 start、stop、init、doctor 或 record 管理能力。
+- 只操作由 holder 创建的窗口和 tab，以及 opener 属于 yodo 的新 tab。
+- 操作：`openWindow`、`openTab`、`closeTab`、`closeWindow`、`listOwned`、`windowOf`、`attach`、`detach`、`send`。
+- 事件：`debuggerEvent`、`debuggerDetach`、`tab.created`、`tab.updated`、`tab.removed`。
 
-### 4.4 `record`
+### 4.4 窗口
 
-录制由 holder 侧的 `record/*` 负责采集，client 只发送 `record.*` op。
+- 录制窗：`openWindow({focused: true})`，tab 标题 `yodo record`。stop、abort 或 holder 退出时关闭整扇窗口。
+- run 窗：holder 记录 `runWindowId`，窗口与一个锚点 tab（`about:blank`，标题 `yodo run`）同时存在。锚点 tab 保留，保证窗口存活。
+- 每次 run 新开一个 tab，结束时 detach 并关闭它。不复用 tab。
+- run 窗被用户关闭后，下次 run 静默重建。holder 退出时关闭 run 窗。
 
-### 4.5 Holder 与 session
+### 4.5 录制
 
-`~/.yodo/session/` 包含：
+- `record start` 在 `~/.yodo/session/recording/<name>/` 下生成录制；`record stop` 移入 `~/.yodo/record/<name>/`。
+- 录制输出：`timeline.jsonl`（request 行与 action 行）、请求文件与响应文件。没有 `DOMTimeline.jsonl`，没有 `final-state`，没有 `eventId`。
+- action 类型：`click`、`value`、`checked`、`scroll`、`navigation`。`submit` 与 `keydown` 不记录。
+- 脱敏保留；adblock 过滤保留。
+- `record stop` 输出 `status`、`name`、`recordDir`、`timeline`。
 
-| 文件 | 用途 |
-|---|---|
-| `sock` | client 与 holder 的本地 socket |
-| `pid` | holder 进程号 |
-| `log.jsonl` | holder 日志 |
+### 4.6 存储与安装
 
-`holder run` 没有 abort op。中止时关闭 client 进程，holder 收到 socket close 后清理。holder 占死或 `task` 同步死循环时终止 `pid`；这只断开 CDP，不关闭 Chrome。
+- 用户数据目录只有 `~/.yodo/task`、`~/.yodo/record`，运行时状态在 `~/.yodo/session`，运行时代码在 `~/.yodo/src`。
+- 没有 `state.json`，不做失败统计，不做重试限制。
+- `setup.js` 是安装引导脚本，依赖 skill 包本身，负责拷贝运行时、安装依赖、注册 native host、生成 shim、运行 `doctor`。
+- `yodo doctor` 只读。
 
-holder 返回的 `ok` 只表示 op 已执行。`result` 由 client 侧 `yodo.run` 生成，并在 stdout 输出 `task status` `success` 或 `failure`；判断 `task` 成功时只看该 `task status`。
-
-### 4.6 管理录制窗口 attach
-
-- **attach 范围**：禁止在 browser 级启用 `Target.setAutoAttach`；只对录制窗口中的 page 执行 `attachToTarget`，不 attach 其它窗口、`chrome://` 或 `devtools://`。
-- **新页面**：popup 依赖对应 page session 的 related `setAutoAttach`，参数为 `waitForDebuggerOnStart: false`、`filter: [{ type: "page" }]`；sibling 新 tab 由 `Target.setDiscoverTargets` 通知，再按 `windowId` 判断是否 attach。
-- **窗口**：使用 `newWindow: true`、`background: true`、`focus: false` 创建；空白 tab 的 `document.title` 为 `yodo record`，不调用 `Page.bringToFront`。
-- **空闲与收尾**：idle holder 只保留 CDP WebSocket，设置 `autoAttach: false`、`discover: false`；stop、abort 或超时后关闭整扇录制窗口。
-
-### 4.7 管理运行窗口 attach
-
-- **创建**：`run.begin` 确保后台运行窗口存在；不存在或被用户关闭时，以 `newWindow: true`、`background: true`、`focus: false` 重新创建。唯一 tab 标题为 `yodo run`。
-- **复用**：`newPage` 返回唯一 tab，并先导航到 `about:blank`；不新开 tab，也不连接用户已有 tab。CDP 无法在不抢前台时把新 tab 放入指定窗口，因此必须复用该 tab。
-- **清理**：`run.end` 把 tab 导航到 `about:blank` 并恢复标题，但不关闭窗口；holder 停止时才关闭整扇窗口。若关闭后 Chrome 将没有其它窗口，先创建一扇后台空白窗口。
-- **恢复**：用户手动关闭窗口后，下次 `run.begin` 再创建。`goto` 不支持 `waitUntil`。
-
-## 5. `record material` 处理
-
-### 5.1 收尾
-
-- stop、abort、5 分钟超时或断线时，关闭 discover，detach 自己 attach 的 page，并关闭录制窗口。
-- 第一条 document 请求漏录时，可以补当前 `outerHTML` 并标记为 `late`。它是迟到的页面快照，不能伪装成 HTTP 200。
-- `late` 比单次 HTML GET 包含更多信息；可以查找快照，也可以对其 URL 再发 HTML GET，但不操作 DOM，也不把快照当成页面操作。
-- 响应体超过 1KB 时，拆成 `*.response.json` 或 `*.response.html`。
-
-### 5.2 过滤
-
-- 只保留 2xx 成功请求；没有 HTTP `status` 的 `late` 仍保留。
-- 不保留 301 或 302。
-- 不设置 `navigateTimeWindowMs` 或 `eventTimeWindowAfterMs`。
-- timeline 行不写 `frameUrl`；`mainDoc` 是页面上下文锚点；request 文件仍保留 `frameUrl`。
-- 使用 `@ghostery/adblocker` 过滤第三方无关打点；`mainDoc` 和 `doc` 始终保留。
-
-### 5.3 去重与脱敏
-
-| 类型 | 处理 |
-|---|---|
-| `mainDoc` / `doc` | 不去重 |
-| 同 site 的第一方 xhr/fetch | 全部保留 |
-| 第三方请求 | 按 `method + bareUrl` 去重，只保留最后一次 |
-| 敏感字段与密码 | 落盘前替换为稳定 alias |

@@ -15,11 +15,8 @@ export type DomEventType =
   | "click"
   | "fill"
   | "change"
-  | "submit"
-  | "keydown"
   | "scroll"
-  | "navigation"
-  | "final-state";
+  | "navigation";
 
 export type TimelineRequestItem = {
   t: number;
@@ -30,14 +27,15 @@ export type TimelineRequestItem = {
   file: string;
 };
 
+/** 录制的操作类型：click、value、checked、scroll，以及 navigation。 */
+export type TimelineActionType = "click" | "value" | "checked" | "scroll" | "navigation";
+
 export type TimelineDomEventItem = {
-  eventId: string;
   t: number;
   type: "action";
-  actionType: Exclude<DomEventType, "final-state">;
+  actionType: TimelineActionType;
   role?: string;
   name?: string;
-  key?: string;
   url?: string;
 };
 
@@ -52,7 +50,6 @@ export type DomElement = {
 };
 
 export type DomTimelineItem = {
-  eventId: string;
   t: number;
   type: DomEventType;
   url: string;

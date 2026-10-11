@@ -30,3 +30,42 @@ export async function goto(page, url, options = {}) {
     await Promise.all(offs.map((off) => off()));
   }
 }
+
+/**
+ * 执行 action，并等待它触发的第一个匹配请求完成。
+ * 返回 { status, body }：status 为 HTTP 状态码，body 为响应文本。
+ * 没有发出匹配请求、或请求失败时抛出错误。
+ */
+export async function expectRequest(page, { method, path }, action, { timeout = 15_000 } = {}) {
+  await page.cdp.send("Network.enable");
+  const statuses = new Map();
+  let settle;
+  const finished = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+  const offs = [
+    page.cdp.on("Network.requestWillBeSent", (e) => {
+      if (e.request.method === method && new URL(e.request.url).pathname === path) statuses.set(e.requestId, undefined);
+    }),
+    page.cdp.on("Network.responseReceived", (e) => {
+      if (statuses.has(e.requestId)) statuses.set(e.requestId, e.response.status);
+    }),
+    page.cdp.on("Network.loadingFinished", (e) => {
+      if (statuses.has(e.requestId)) settle.resolve(e.requestId);
+    }),
+    page.cdp.on("Network.loadingFailed", (e) => {
+      if (statuses.has(e.requestId)) settle.reject(new Error(e.errorText));
+    }),
+  ];
+  let timer;
+  try {
+    await action();
+    const requestId = await Promise.race([
+      finished,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`未发出请求：${method} ${path}`)), timeout); }),
+    ]);
+    const { body } = await page.cdp.send("Network.getResponseBody", { requestId });
+    return { status: statuses.get(requestId), body };
+  } finally {
+    clearTimeout(timer);
+    for (const off of offs) off();
+  }
+}
