@@ -7,6 +7,12 @@ export const YODO_HOME = path.join(os.homedir(), ".yodo");
 export const TASK_DIR = path.join(YODO_HOME, "task");
 export const RECORD_DIR = path.join(YODO_HOME, "record");
 export const SESSION_DIR = path.join(YODO_HOME, "session");
+/** 运行历史：run/<task>/<时间戳>.json，组合运行记为 run/compose/。 */
+export const RUN_DIR = path.join(YODO_HOME, "run");
+/** 每个 task（含 compose）保留的最近运行历史份数。 */
+export const RUN_HISTORY_KEEP = 20;
+/** `yodo eval` 生成的临时组合脚本目录，运行后删除。 */
+export const COMPOSE_DIR = path.join(SESSION_DIR, "compose");
 /** 进行中的录制目录；stop 时移入 RECORD_DIR，holder 启动时清理残留。 */
 export const RECORDING_DIR = path.join(SESSION_DIR, "recording");
 /** posix 用文件 socket；win32 用 named pipe（不是 fs 文件）。 */

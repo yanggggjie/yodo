@@ -23,17 +23,20 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 |---|---|
 | `yodo run` | 列出 task 摘要（名称、`@status`、`@summary`、参数） |
 | `yodo run <task> [args...]` | 运行 task，stdout 输出 JSON |
+| `yodo eval '<代码>'` | 顺序组合多个 task，stdout 输出 JSON（见第 5.1 节） |
 | `yodo record start [name]` | 开始录制，打开标题为 `yodo record` 的窗口 |
 | `yodo record stop` | 结束录制，输出 `recordDir` 与 `timeline` |
 | `yodo record abort` | 放弃录制 |
-| `yodo doctor` | 只读检查安装与连接状态 |
+| `yodo doctor [--json]` | 只读检查安装与连接状态；`--json` 输出 `{ ok, checks }`，失败项带 `fix` |
 
 ## 3. 结果与错误
 
-- `yodo run` 的 stdout 是 JSON：`status` 与 `result`。
-- 失败时错误输出到 stderr，退出码非零。是否重试、是否修改 task，由你根据错误信息决定。
+- `yodo run` 与 `yodo eval` 的 stdout 是 JSON：`status` 与 `result`。stdout 总是完整输出，不会写到文件。
+- 失败时 stdout 是 `{ "status": "failure", "error": "..." }`，退出码非零。是否重试、是否修改 task，由你根据错误信息决定。
+- `yodo eval` 中某个内层 task 失败时，还会带 `failedTask`，值为该 task 名。
 - 输出 `need-install`、`need-chrome` 或 `need-extension` 时，把 `guide` 原样告诉用户，等待用户回复「好了」，然后重新运行同一条命令。不要改写 `guide`，不要轮询。
 - `result` 只包含用户要求的内容。原始接口响应、整段 HTML、完整列表只能在 task 内部用于取值。
+- 每次运行（包括 `eval` 内层调用）的输入与输出都会保存，每个 task 保留最近 20 份，用于排查问题。
 
 ## 4. 录制与学习
 
@@ -89,6 +92,19 @@ task 只有在确认结果正确时才能返回，否则必须抛出错误：
 - 接口请求必须检查 HTTP 状态码。非 200 时抛出错误，并说明原因（如未登录、无权限）。
 - 接口返回业务码的，必须检查业务码（如 `code !== 0`）。
 - 有副作用的操作，成功判断依据是操作后的状态或响应，而不是点击没有报错。
+
+### 5.1 组合
+
+用 `yodo eval` 顺序调用已有 task，代码运行在 async 函数中，`return` 的值作为 `result`：
+
+```bash
+yodo eval 'const list = await task("x-search-recent", "claude", 3); return list.map((t) => t.text);'
+```
+
+- 组合中只能通过 `task(name, ...args)` 调用 task，不能访问页面。需要复用的逻辑写成 task。
+- 组合代码里的 `console.log` 输出到 stderr，stdout 只有最终 JSON。
+- `@status: draft` 的 task 不能在组合中调用。
+- 单个 task 的过滤、加工由你直接处理 JSON，不用 `eval`。
 
 ## 6. 草稿与验证
 

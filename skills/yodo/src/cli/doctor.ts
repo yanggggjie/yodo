@@ -11,65 +11,100 @@ import { chromeRunning } from "../browser/connect.ts";
 import { EXTENSION_ID, HOLDER_ENTRY, RELAY_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
 
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
+const SETUP_FIX = "运行 setup.js";
 
-/** 排障：Node 版本、代码运行位置、`.yodo/` 布局、依赖、holder 存活。 */
-export function handleDoctor(): void {
+interface Check {
+  name: string;
+  ok: boolean;
+  /** 通过时说明当前状态；失败时说明看到的值。 */
+  detail: string;
+  /** 失败时的修复命令，文字版与 --json 相同。 */
+  fix: string;
+  /** 可选项不影响退出码与顶层 ok（如 Chrome 未运行、holder 未连接）。 */
+  optional?: boolean;
+}
+
+function exists(p: string): boolean {
+  return fs.existsSync(p);
+}
+
+/** 只读检查：不写任何文件，不改注册表。 */
+function collectChecks(): Check[] {
+  const checks: Check[] = [];
+  const add = (check: Check): void => { checks.push(check); };
+
   const major = Number(process.versions.node.split(".")[0]);
   const nodeOk = Number.isFinite(major) && major >= 24;
-  console.log(`node ${process.version} ${nodeOk ? "ok" : "需要 >=24"}`);
-  if (!nodeOk) process.exitCode = 1;
-  console.log(`platform ${process.platform}`);
-  console.log(
-    `home ${YODO_HOME} ${fs.existsSync(YODO_HOME) ? "ok" : "缺失（跑 setup / init）"}`,
-  );
-
-  console.log(`running from ${import.meta.dirname}`);
+  add({ name: "node", ok: nodeOk, detail: process.version, fix: "安装 Node >=24" });
+  add({ name: "platform", ok: true, detail: process.platform, fix: "" });
+  add({ name: "home", ok: exists(YODO_HOME), detail: YODO_HOME, fix: SETUP_FIX });
+  add({ name: "entry", ok: true, detail: import.meta.dirname, fix: "" });
 
   const srcPath = path.join(YODO_HOME, "src");
-  if (fs.existsSync(srcPath)) {
-    console.log(`src ok`);
-  } else {
-    console.log(`src 缺失（跑 setup）`);
-    process.exitCode = 1;
-  }
-
+  add({ name: "src", ok: exists(srcPath), detail: srcPath, fix: SETUP_FIX });
   const marker = path.join(srcPath, DEPS_MARKER);
-  console.log(`deps ${fs.existsSync(marker) ? "ok" : "缺失（再跑 setup）"}`);
-  if (!fs.existsSync(marker)) process.exitCode = 1;
+  add({ name: "deps", ok: exists(marker), detail: marker, fix: SETUP_FIX });
 
   for (const [name, dir] of [
     ["task", TASK_DIR],
     ["record", RECORD_DIR],
     ["session", SESSION_DIR],
   ] as const) {
-    console.log(`  ${name}/ ${fs.existsSync(dir) ? "ok" : "缺失"}`);
+    add({ name, ok: exists(dir), detail: dir, fix: SETUP_FIX });
   }
 
-  // 只读检查：不写任何文件，不改注册表。
   const manifest = manifestPath();
   const manifestOk = nativeHostInstalled();
-  console.log(`native host manifest ${manifestOk ? "ok" : "缺失（跑 setup 或 yodo install）"} ${manifest}`);
-  if (!manifestOk) process.exitCode = 1;
+  add({ name: "native-host", ok: manifestOk, detail: manifest, fix: SETUP_FIX });
   if (manifestOk) {
     const launcher = launcherPath();
-    const launcherOk = fs.existsSync(launcher) && fs.existsSync(HOLDER_ENTRY) && fs.existsSync(RELAY_ENTRY);
-    console.log(`  launcher ${launcherOk ? "ok" : "缺失或 holder 入口缺失"} ${launcher}`);
-    if (!launcherOk) process.exitCode = 1;
+    const launcherOk = exists(launcher) && exists(HOLDER_ENTRY) && exists(RELAY_ENTRY);
+    add({ name: "launcher", ok: launcherOk, detail: launcher, fix: SETUP_FIX });
+
+    let idOk = false;
     try {
       const parsed = JSON.parse(fs.readFileSync(manifest, "utf8")) as { allowed_origins?: string[] };
-      const idOk = parsed.allowed_origins?.includes(`chrome-extension://${EXTENSION_ID}/`) ?? false;
-      console.log(`  extension id ${idOk ? "匹配" : "不匹配（跑 setup 重写 manifest）"} ${EXTENSION_ID}`);
-      if (!idOk) process.exitCode = 1;
+      idOk = parsed.allowed_origins?.includes(`chrome-extension://${EXTENSION_ID}/`) ?? false;
     } catch {
-      console.log("  extension id 无法读取 manifest");
-      process.exitCode = 1;
+      idOk = false;
     }
+    add({ name: "extension-id", ok: idOk, detail: EXTENSION_ID, fix: "运行 setup.js 重写 manifest" });
   }
 
-  console.log(`chrome ${chromeRunning() ? "running" : "未运行"}`);
+  const chrome = chromeRunning();
+  add({ name: "chrome", ok: chrome, detail: chrome ? "running" : "未运行", fix: "启动 Google Chrome", optional: true });
 
   const pid = readSessionPid();
-  console.log(
-    `holder ${pid ? (isPidAlive(pid) ? `alive pid=${pid}` : `stale pid=${pid}`) : "无（扩展未连接或 Chrome 未运行）"}`,
-  );
+  const alive = pid !== null && isPidAlive(pid);
+  add({
+    name: "holder",
+    ok: alive,
+    detail: pid ? (alive ? `alive pid=${pid}` : `stale pid=${pid}`) : "无",
+    fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标",
+    optional: true,
+  });
+
+  return checks;
+}
+
+/** 排障：默认文字，`--json` 输出 `{ ok, checks }`。失败项带 fix。 */
+export function handleDoctor(json: boolean): void {
+  const checks = collectChecks();
+  const ok = checks.every((check) => check.ok || check.optional);
+  if (!ok) process.exitCode = 1;
+
+  if (json) {
+    const out = checks.map((check) => ({
+      name: check.name,
+      ok: check.ok,
+      detail: check.detail,
+      ...(check.ok ? {} : { fix: check.fix }),
+    }));
+    console.log(JSON.stringify({ ok, checks: out }, null, 2));
+    return;
+  }
+
+  for (const check of checks) {
+    console.log(check.ok ? `${check.name} ok ${check.detail}`.trimEnd() : `${check.name} ${check.detail} 失败（${check.fix}）`);
+  }
 }

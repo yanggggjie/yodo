@@ -127,7 +127,7 @@ export const yodo = {
       const logs: string[] = []; restore = captureConsole(logs);
       const result = await fn({ page });
       restore(); restore = undefined;
-      console.log(runSuccessJson(scriptAbs, result));
+      console.log(runSuccessJson(result));
     } catch (error) {
       restore?.(); restore = undefined;
       const status = error instanceof RpcError ? (error.data as { status?: string } | undefined)?.status : undefined;

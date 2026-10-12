@@ -2,12 +2,8 @@
  * client 侧的 task run 输出格式化：console 捕获、success/failure JSON、栈裁剪。
  * 从旧 exec/index.ts 迁来——task 现在在 client 进程跑，这些也搬到 client。
  */
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-
-const MAX_STDOUT_BYTES = 8 * 1024;
 
 export function captureConsole(sink: string[]): () => void {
   const orig = {
@@ -62,20 +58,8 @@ export function formatStack(err: unknown, scriptAbs: string): string[] {
   return lines;
 }
 
-export function runSuccessJson(scriptAbs: string, result: unknown): string {
-  const resultStr = JSON.stringify(result);
-  const resultBytes = resultStr ? Buffer.byteLength(resultStr) : 0;
-  if (resultBytes > MAX_STDOUT_BYTES) {
-    const outputFile = path.join(path.dirname(scriptAbs), "output.json");
-    try {
-      fs.writeFileSync(outputFile, resultStr, "utf8");
-      return JSON.stringify({ status: "success", resultFile: outputFile }, null, 2);
-    } catch {
-      const fallback = path.join(os.tmpdir(), `yodo-output-${Date.now()}.json`);
-      fs.writeFileSync(fallback, resultStr, "utf8");
-      return JSON.stringify({ status: "success", resultFile: fallback }, null, 2);
-    }
-  }
+/** stdout 始终输出完整 JSON；大结果由 task 自己裁剪，不再落盘。 */
+export function runSuccessJson(result: unknown): string {
   return JSON.stringify({ status: "success", result }, null, 2);
 }
 
