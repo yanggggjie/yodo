@@ -48,7 +48,7 @@ async function recordCall(method: "record.start" | "record.stop" | "record.abort
   try { print(await ensureSessionAndRpc(method, params, timeout)); }
   catch (error) {
     const value = error as { data?: { status?: string }; message?: string };
-    if (value.data?.status) print({ status: value.data.status, guide: value.message ?? "" });
+    if (value.data?.status) { print({ status: value.data.status, guide: value.message ?? "" }); process.exitCode = 1; }
     else { print({ error: value.message ?? String(error) }); process.exitCode = 1; }
   }
 }
