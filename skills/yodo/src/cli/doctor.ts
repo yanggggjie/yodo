@@ -6,7 +6,7 @@ import {
   TASK_DIR,
   YODO_HOME,
 } from "../utils/constants.ts";
-import { isPidAlive, readSessionPid } from "./spawn.ts";
+import { isPidAlive, readSessionPid, tryPing } from "./session.ts";
 import { chromeRunning } from "../browser/connect.ts";
 import { EXTENSION_ID, HOLDER_ENTRY, RELAY_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
 
@@ -29,7 +29,7 @@ function exists(p: string): boolean {
 }
 
 /** 只读检查：不写任何文件，不改注册表。 */
-function collectChecks(): Check[] {
+async function collectChecks(): Promise<Check[]> {
   const checks: Check[] = [];
   const add = (check: Check): void => { checks.push(check); };
 
@@ -74,13 +74,15 @@ function collectChecks(): Check[] {
   const chrome = chromeRunning();
   add({ name: "chrome", ok: chrome, detail: chrome ? "running" : "未运行", fix: "启动 Google Chrome", optional: true });
 
+  // pid 存活不代表 holder 可用：再 ping 一次，卡死的 holder 也会被发现。
   const pid = readSessionPid();
   const alive = pid !== null && isPidAlive(pid);
+  const responding = alive ? (await tryPing()) !== null : false;
   add({
     name: "holder",
-    ok: alive,
-    detail: pid ? (alive ? `alive pid=${pid}` : `stale pid=${pid}`) : "无",
-    fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标",
+    ok: responding,
+    detail: pid ? (responding ? `alive pid=${pid}` : alive ? `pid=${pid} 无响应` : `stale pid=${pid}`) : "无",
+    fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标；仍无响应则在 chrome://extensions 刷新扩展",
     optional: true,
   });
 
@@ -88,8 +90,8 @@ function collectChecks(): Check[] {
 }
 
 /** 排障：默认文字，`--json` 输出 `{ ok, checks }`。失败项带 fix。 */
-export function handleDoctor(json: boolean): void {
-  const checks = collectChecks();
+export async function handleDoctor(json: boolean): Promise<void> {
+  const checks = await collectChecks();
   const ok = checks.every((check) => check.ok || check.optional);
   if (!ok) process.exitCode = 1;
 

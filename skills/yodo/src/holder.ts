@@ -72,9 +72,9 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
     const params = paramsOf(req);
     switch (req.method) {
       case "run.begin": {
-        if (activeRunConn) throw Object.assign(new Error("run 进行中"), { code: RPC_ERRORS.RUN_BUSY });
-        const record = liveRecordName(); if (record) throw Object.assign(new Error(`record ${record} 仍在进行；请先 record stop/abort`), { code: RPC_ERRORS.RUN_BUSY });
-        if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY });
+        if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
+        const record = liveRecordName(); if (record) throw Object.assign(new Error(`录制 ${record} 正在进行，请先 record stop 或 record abort`), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record" } });
+        if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } });
         activeRunConn = conn; conn.runActive = true;
         try {
           browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
@@ -93,8 +93,8 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
         return await browser!.raw.send(method, (params.params as Record<string, unknown> | undefined) ?? {}, page.sessionId, typeof params.timeoutMs === "number" ? params.timeoutMs : undefined);
       }
       case "record.start": {
-        if (activeRunConn) throw Object.assign(new Error("run 进行中；请等结束再 record start"), { code: RPC_ERRORS.RUN_BUSY });
-        if (recordBusy) throw Object.assign(new Error("record 操作进行中"), { code: RPC_ERRORS.RUN_BUSY }); recordBusy = true;
+        if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后再 record start"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
+        if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } }); recordBusy = true;
         try { return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
         catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
         finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }

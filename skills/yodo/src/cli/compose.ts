@@ -9,12 +9,14 @@ import * as path from "node:path";
 import { COMPOSE_DIR, RUN_DIR, TASK_DIR } from "../utils/constants.ts";
 import { isHandshakeStatus, type HandshakeStatus } from "../protocol.ts";
 import { writeRunHistory } from "../run-history.ts";
-import { invokeTaskFile, taskFile, taskSummary } from "./tasks.ts";
+import { invokeTaskFile, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 
 export interface ComposePaths {
   taskDir: string;
   runDir: string;
   composeDir: string;
+  /** 单个内层 task 的超时，默认按各 task 的 @timeout 或 TASK_TIMEOUT_MS；自检里调小。 */
+  taskTimeoutMs?: number;
 }
 
 const DEFAULT_PATHS: ComposePaths = { taskDir: TASK_DIR, runDir: RUN_DIR, composeDir: COMPOSE_DIR };
@@ -51,9 +53,10 @@ export function createTask(paths: ComposePaths = DEFAULT_PATHS): TaskFn {
     }
 
     const argv = args.map((arg) => String(arg));
-    const run = invokeTaskFile(file, argv);
+    const timeoutMs = paths.taskTimeoutMs ?? taskTimeoutMs(file);
+    const run = invokeTaskFile(file, argv, timeoutMs);
     if (run.stderr) process.stderr.write(run.stderr);
-    const output = (run.output ?? { status: "failure", error: `无法解析输出（退出码 ${run.exitCode}）` }) as {
+    const output = taskOutput(run, timeoutMs) as {
       status?: string;
       result?: unknown;
       error?: string;

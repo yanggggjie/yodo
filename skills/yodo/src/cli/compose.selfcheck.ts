@@ -16,6 +16,7 @@ fs.writeFileSync(path.join(taskDir, "ok.js"), `console.log(JSON.stringify({ stat
 fs.writeFileSync(path.join(taskDir, "noisy.js"), `console.log("progress line");\nconsole.log(JSON.stringify({ status: "success", result: process.argv.slice(2) }, null, 2));\n`);
 fs.writeFileSync(path.join(taskDir, "bad.js"), `console.log(JSON.stringify({ status: "failure", error: "boom" }, null, 2));\nprocess.exitCode = 1;\n`);
 fs.writeFileSync(path.join(taskDir, "guide.js"), `console.log(JSON.stringify({ status: "need-extension", guide: "请连接扩展" }, null, 2));\nprocess.exitCode = 1;\n`);
+fs.writeFileSync(path.join(taskDir, "hang.js"), `setInterval(() => {}, 1000);\n`);
 fs.writeFileSync(path.join(taskDir, "draft.js"), `/**\n * @status: draft\n */\nconsole.log(JSON.stringify({ status: "success", result: "draft" }));\n`);
 
 try {
@@ -33,6 +34,10 @@ try {
   await assert.rejects(task("missing"), (error) => error instanceof TaskError && error.task === "missing");
   await assert.rejects(task("guide"), (error) => error instanceof HandshakeError && error.status === "need-extension");
   assert.equal(fs.readdirSync(path.join(runDir, "ok")).length, 1, "内层 task 应写运行历史");
+
+  // 内层 task 超时：被终止并按失败返回
+  const quick = createTask({ ...paths, taskTimeoutMs: 400 });
+  await assert.rejects(quick("hang"), (error) => error instanceof TaskError && error.task === "hang" && /未结束/.test(error.message));
 
   // 完整组合：顺序执行、stdout 只有 JSON、console 走 stderr
   const chain = runEval(`

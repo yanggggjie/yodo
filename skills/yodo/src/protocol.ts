@@ -40,6 +40,7 @@ export function handshakeStatusFromError(error: unknown): HandshakeStatus | null
 export function formatHandshakeStdout(status: HandshakeStatus): string {
   return JSON.stringify({ status, guide: HANDSHAKE_GUIDES[status] }, null, 2);
 }
+/** 所有命令的失败输出：总是带 status，握手类失败另用 formatHandshakeStdout。 */
 export function formatErrorStdout(error: string): string {
-  return JSON.stringify({ error });
+  return JSON.stringify({ status: "failure", error }, null, 2);
 }

@@ -1,3 +1,6 @@
+/** 单个步骤（evaluate、goto、waitForSelector、expectRequest）的默认最长等待时间。 */
+export const STEP_TIMEOUT_MS = 30_000;
+
 function expressionOf(fnOrString, args) {
   if (typeof fnOrString === "string") return fnOrString;
   return `(async () => (${fnOrString.toString()})(${args.map((arg) => JSON.stringify(arg)).join(", ")}))()`;
@@ -12,7 +15,7 @@ export async function evaluate(page, fnOrString, ...args) {
 
 export async function goto(page, url, options = {}) {
   await page.cdp.send("Page.enable");
-  const timeout = options.timeout ?? 30_000;
+  const timeout = options.timeout ?? STEP_TIMEOUT_MS;
   let finish;
   const loaded = new Promise((resolve, reject) => { finish = (error) => error ? reject(error) : resolve(); });
   const offs = await Promise.all([
@@ -36,7 +39,7 @@ export async function goto(page, url, options = {}) {
  * 返回 { status, body }：status 为 HTTP 状态码，body 为响应文本。
  * 没有发出匹配请求、或请求失败时抛出错误。
  */
-export async function expectRequest(page, { method, path }, action, { timeout = 15_000 } = {}) {
+export async function expectRequest(page, { method, path }, action, { timeout = STEP_TIMEOUT_MS } = {}) {
   await page.cdp.send("Network.enable");
   const statuses = new Map();
   let settle;

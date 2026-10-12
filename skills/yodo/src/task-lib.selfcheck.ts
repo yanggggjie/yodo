@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { click, fill, press, scroll } from "./templates/task-lib/dom.js";
+import { click, fill, press, scroll, waitForSelector } from "./templates/task-lib/dom.js";
 import { evaluate, goto } from "./templates/task-lib/page.js";
 import type { PageHandle } from "./sdk.ts";
 
@@ -41,4 +41,18 @@ assert.match(expressions[0], /\.click\(\)/);
 assert.match(expressions[1], /setter\.call/);
 assert.match(expressions[2], /new KeyboardEvent/);
 assert.match(expressions[3], /scrollBy/);
+
+// waitForSelector 在 Node 侧轮询：每次只做一次快速 evaluate，出现后立即返回
+let polls = 0;
+const waiting = { _targetId: "P2", cdp: {
+  async send(method: string) {
+    if (method === "Runtime.evaluate") { polls++; return { result: { value: polls >= 3 } }; }
+    return {};
+  },
+  on() { return () => {}; },
+  async once() { return {}; },
+} } as unknown as PageHandle;
+await waitForSelector(waiting, "#late");
+assert.equal(polls, 3, "前两次没找到，第三次出现");
+
 console.log("task lib selfcheck ok");

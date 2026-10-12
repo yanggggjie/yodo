@@ -6,7 +6,7 @@ export function press(page: PageHandle, selector: string, key: string): Promise<
 export function scroll(page: PageHandle, selector: string | undefined, options: { deltaX?: number; deltaY?: number }): Promise<void>;
 export function check(page: PageHandle, selector: string, checked: boolean): Promise<void>;
 export function select(page: PageHandle, selector: string, value: string): Promise<void>;
-export function waitForSelector(page: PageHandle, selector: string, options?: { state?: "attached" | "visible"; timeout?: number }): Promise<void>;
+export function waitForSelector(page: PageHandle, selector: string, options?: { state?: "attached" | "visible" }): Promise<void>;
 export function toggle(
   page: PageHandle,
   selector: string,

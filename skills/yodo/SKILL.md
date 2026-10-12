@@ -12,7 +12,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 
 1. `yodo run` 列出 task 摘要。有能完成当前目标的 task，直接运行。
 2. 没有可用 task：`yodo record start`，请用户在标题为 `yodo record` 的窗口里演示一遍，用户回复后 `yodo record stop`。
-3. 读取 stop 返回的 `timeline` 与 `recordDir` 下的响应文件，写一个新 task。选择 network 还是 dom 由你依据材料判断。
+3. 读取 stop 返回的 `timeline` 与 `recordDir` 下的响应文件，写一个新 task。
 4. `yodo run <task> <参数>`。`status: success` 才算完成。通过后把文件头的 `@status` 改为 `verified`。
 
 ## 2. 命令
@@ -31,19 +31,20 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 
 ## 3. 结果与错误
 
-- `yodo run` 与 `yodo eval` 的 stdout 是 JSON：`status` 与 `result`。stdout 总是完整输出，不会写到文件。
-- 失败时 stdout 是 `{ "status": "failure", "error": "..." }`，退出码非零。是否重试、是否修改 task，由你根据错误信息决定。
+- `yodo run` 与 `yodo eval` 的 stdout 是 JSON：`status` 与 `result`。结果总是完整输出在 stdout，不会因为太大而改成文件路径。
+- 每次运行的输入与输出也会保存到 `~/.yodo/run/<task>/`（`eval` 保存到 `run/compose/`），每个 task 保留最近 20 份。只用于排查问题，不影响 stdout。
+- 以 `status` 为准：`success` 退出码为 0；`failure` 和 `need-*` 退出码都非零。任何命令失败时，stdout 都是 `{ "status": "failure", "error": "..." }`。是否重试、是否修改 task，由你根据错误信息决定。
+- 同一时间只能运行一个 task。另一个 task 正在运行时，会自动等待最多 30 秒再开始；仍被占用则失败，稍后重试同一条命令。录制进行中不能运行 task，需先 `yodo record stop` 或 `yodo record abort`。
+- 超时分两层：单个步骤（`evaluate`、`goto`、`waitForSelector`、`expectRequest`）默认最长 30 秒；整个 task 默认最长 90 秒。超时会被终止并按失败返回，错误里会说明是哪一层。`yodo eval` 对每个内层 task 单独计时。
 - `yodo eval` 中某个内层 task 失败时，还会带 `failedTask`，值为该 task 名。
 - 输出 `need-install`、`need-chrome` 或 `need-extension` 时，把 `guide` 原样告诉用户，等待用户回复「好了」，然后重新运行同一条命令。不要改写 `guide`，不要轮询。
 - `result` 只包含用户要求的内容。原始接口响应、整段 HTML、完整列表只能在 task 内部用于取值。
-- 每次运行（包括 `eval` 内层调用）的输入与输出都会保存，每个 task 保留最近 20 份，用于排查问题。
 
 ## 4. 录制与学习
 
 - 录制窗口的标题是 `yodo record`。请用户只在这个窗口里演示。
 - `timeline.jsonl` 按时间排序，包含 request 行（有 `file` 指向请求文件）和 action 行（`click`、`value`、`checked`、`scroll`、`navigation`，附带 `role` 与 `name`）。
 - 响应体存为 `recordDir` 下的文件。需要看响应时直接读取文件。
-- 选择 network 还是 dom：接口能完整表达操作且不需要页面生成的签名、token 时用 network；否则用 dom。拿不准时先用 network 试一次，失败后改用 dom。
 
 ## 5. 写 task
 
@@ -53,15 +54,14 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 /**
  * @summary 按关键词搜索
  * @status: draft
- * @executor network
  * @record <record name>
  * @param argv[2] 搜索词
  */
 ```
 
 - `@status`：`draft` 或 `verified`。
-- `@executor`：`network` 或 `dom`。
 - `@record`：写 task 时使用的录制名。
+- `@timeout`：可选，整个 task 的最长运行秒数，默认 90。只有确实需要更久时才写，例如 `@timeout 180`；步骤超时之和应小于它，这样出错时能看到具体是哪一步。
 - `@param`：每个参数的含义。
 - 脚本通过 `process.argv` 读取参数。
 
@@ -83,6 +83,12 @@ await yodo.run(async ({ page }) => {
 - `toggle(page, selector, { target: true | false })`：先读状态，已满足则返回 `already`，否则点击一次返回 `done`。有副作用的操作用它。
 - `expectRequest(page, { method, path }, action)`：执行 action，并等待它触发的请求完成，返回 `{ status, body }`。会发请求的操作用它判断是否成功。没有对应请求说明操作没有生效。
 - 不要在 task 里关闭用户已有的 tab，不要修改 holder 的状态。
+
+### 写法
+
+- 优先在页面内调用接口（`fetch`，带登录态）：快、稳定，响应可直接检查状态码和业务码。
+- 接口依赖页面生成的签名、token，或接口无法完整表达操作时，再操作页面（`click`、`fill` 等）。
+- 拿不准时先试接口，失败后改用页面操作。
 
 ### 成功判断
 

@@ -30,8 +30,12 @@ export const CDP_SHORT_TIMEOUT_MS = 2_000;
 /** holder 起来并连上已开 CDP 的 Chrome。不等 Allow。 */
 export const HOLDER_READY_MS = 8_000;
 export const CDP_COMMAND_TIMEOUT_MS = 30_000;
-/** CLI 等 holder 回包比脚本 watchdog 多这点，给 failure JSON + settleIdle。 */
+/** CLI 等 holder 回包时，在 holder 侧上限之外多留的缓冲。 */
 export const CLI_RPC_BUFFER_MS = 5_000;
+/** 单个 task 子进程的默认最长运行时间，超时按失败返回并终止进程；task 头部可用 @timeout <秒> 调整。 */
+export const TASK_TIMEOUT_MS = 90_000;
+/** run.begin 遇到另一个 task 正在运行时，自动等待并重试的最长时间。 */
+export const RUN_BUSY_WAIT_MS = 30_000;
 export const RECORD_STOP_RPC_MS = 60_000;
 /** 录制最长 5 分钟，到点按 stop 归档。 */
 export const RECORD_MAX_MS = 5 * 60 * 1000;

@@ -41,6 +41,6 @@ assert.equal(parsed.status, "need-extension");
 assert.equal(parsed.guide, HANDSHAKE_GUIDES["need-extension"]);
 assert.deepEqual(Object.keys(parsed).sort(), ["guide", "status"]);
 assert.match(formatHandshakeStdout("need-install"), /"status": "need-install"/);
-assert.equal(formatErrorStdout("boom"), '{"error":"boom"}');
+assert.deepEqual(JSON.parse(formatErrorStdout("boom")), { status: "failure", error: "boom" });
 
 console.log("protocol selfcheck ok");

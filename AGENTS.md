@@ -82,12 +82,23 @@ skills/yodo/
 
 | 组成 | 位置 | 职责 |
 |---|---|---|
-| 命令入口 | `src/cli/yodo.ts`，由 `~/.yodo/bin/yodo` shim 调用 | `run`、`record`、`doctor` |
+| 命令入口 | `src/cli/yodo.ts`，由 `~/.yodo/bin/yodo` shim 调用 | `run`、`eval`、`record`、`doctor` |
 | Task SDK | `src/sdk.ts` | 只向 task 暴露 `yodo.run({ page })`，在 client 进程运行 task 闭包 |
 | task-lib | `~/.yodo/task/lib/`，源码在 `src/templates/task-lib/` | 页面操作 helper、`toggle`、`expectRequest`、URL 工具 |
 | task | `~/.yodo/task/<name>.js` | 一个可独立执行和复用的流程，头部 `@status` 区分 `draft` 与 `verified` |
 
 修改 task 直接改 `~/.yodo/task` 中的文件，不再使用 `temp` 候选目录。草稿用 `@status: draft` 标记。
+
+命令入口的约定：
+
+- 只有 `record` 通过 RPC 连 holder（`src/cli/session.ts` 确认 holder 在不在，`src/cli/rpc.ts` 发请求）；`run`、`eval` 在本地起子进程，task 内部才通过 SDK 连 holder。
+- 握手失败返回 `need-install`、`need-chrome`、`need-extension`。没装 host 或 Chrome 没运行时立即返回，只有 `need-extension` 才等待扩展连接（`HOLDER_READY_MS`）。
+- 所有命令失败时 stdout 都带 `status`：`{ status: "failure", error }`，握手类为 `{ status, guide }`。退出码规则只有一条：`status` 为 `success` 时 0，其它一律非零（不另建错误码表；`protocol.ts` 的 `RPC_ERRORS` 只用于 holder 与 CLI 之间的 JSON-RPC）。
+- 并发：holder 同时只允许一个 run。`run.begin` 遇到另一个 run 或录制操作（错误的 `data.reason` 为 `run` 或 `record-op`）时，SDK 每 500ms 重试，最多 `RUN_BUSY_WAIT_MS`（30 秒）；`reason` 为 `record`（录制进行中）时不等待，直接报错。
+- task 文件头只认文件开头第一个块注释里的 `@标签`；读不了的文件在 `yodo run` 列表里标为 `status: "invalid"`，不影响其它 task。
+- 超时只有两层：单步骤 `STEP_TIMEOUT_MS`（30 秒，`src/templates/task-lib/page.js`，用于 `evaluate`、`goto`、`waitForSelector`、`expectRequest`；单条 CDP 命令的 `CDP_COMMAND_TIMEOUT_MS` 同为 30 秒）；整个 task 子进程 `TASK_TIMEOUT_MS`（90 秒），task 头部可用 `@timeout <秒>` 覆盖。超时被 SIGKILL 终止并按失败返回，`eval` 对每个内层 task 单独计时。
+- `waitForSelector` 在 Node 侧轮询，不在页面里跑长循环；它没有 `timeout` 参数，固定使用单步骤上限。
+- `RpcPeer`（`src/cli/rpc.ts`）是唯一的 socket 客户端：`sessionRpc` 是一次一连接的用法，SDK 用它保持长连接并接收页面事件。
 
 ### 4.2 holder
 
@@ -133,6 +144,7 @@ ping
 ### 4.6 存储与安装
 
 - 用户数据目录只有 `~/.yodo/task`、`~/.yodo/record`，运行时状态在 `~/.yodo/session`，运行时代码在 `~/.yodo/src`。
+- 运行历史写入 `~/.yodo/run/<task>/<时间戳>.json`（`eval` 为 `run/compose/`），保存输入参数与输出，每个 task 保留最近 20 份。
 - 没有 `state.json`，不做失败统计，不做重试限制。
 - `setup.js` 是安装引导脚本，依赖 skill 包本身，负责拷贝运行时、安装依赖、注册 native host、生成 shim、运行 `doctor`。
 - `yodo doctor` 只读。
