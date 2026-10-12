@@ -1,4 +1,4 @@
-// 端到端：holder 作为 native host 运行，模拟扩展经 stdio 应答；CLI 侧经 Unix socket 发 RPC。
+// 端到端：relay 作为 native host 运行（拉起 daemon），模拟扩展经 stdio 应答；CLI 侧经 Unix socket 发 RPC。
 // 在临时 HOME 下运行，不碰真实 ~/.yodo。由 npm test 调用。
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -13,6 +13,7 @@ const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-e2e-"));
 const SESSION = path.join(HOME, ".yodo", "session");
 const SOCK = path.join(SESSION, "sock");
 const env = { ...process.env, HOME };
+const RELAY = path.join(SRC, "native-messaging-host", "relay.ts");
 
 function frame(obj) {
   const body = Buffer.from(JSON.stringify(obj), "utf8");
@@ -99,17 +100,18 @@ function closeRpc() { conn?.end(); conn = null; }
 
 const waitFor = async (fn, ms = 8000) => { const end = Date.now() + ms; for (;;) { try { if (await fn()) return; } catch {} if (Date.now() > end) throw new Error("timeout"); await new Promise((r) => setTimeout(r, 50)); } };
 
-const child = spawn(process.execPath, [path.join(SRC, "holder.ts")], { env, stdio: ["pipe", "pipe", "pipe"], cwd: SRC });
+const child = spawn(process.execPath, [RELAY], { env, stdio: ["pipe", "pipe", "pipe"], cwd: SRC });
 child.stderr.on("data", (d) => { if (process.env.E2E_DEBUG) process.stderr.write(d); });
 const ext = fakeExtension(child);
 child.stdin.write(frame({ type: "hello", protocolVersion: 1, chromeVersion: "Chrome/e2e" }));
 
 await waitFor(() => fs.existsSync(SOCK));
+await waitFor(async () => (await rpc("ping")).chrome === "Chrome/e2e");
 const ping = await rpc("ping");
 assert.equal(ping.chrome, "Chrome/e2e", "hello 里的 chromeVersion 应回传到 ping");
 console.log("ping ok:", ping.chrome);
 
-// 第二个 holder：socket 活着，应当直接退出，不覆盖
+// 第二个 daemon：扩展通道 socket 活着，应当直接退出，不覆盖
 const second = spawn(process.execPath, [path.join(SRC, "holder.ts")], { env, stdio: ["pipe", "pipe", "pipe"], cwd: SRC });
 const code = await new Promise((r) => second.on("exit", r));
 assert.equal(code, 0, "已有活的 holder 时，新 holder 应退出");
@@ -147,9 +149,27 @@ const recordFiles = fs.existsSync(path.join(HOME, ".yodo", "record")) ? fs.readd
 console.log("record dir entries:", recordFiles);
 closeRpc();
 
-child.stdin.end(); // Chrome 退出 = stdin 关闭
+const daemonPid = ping.pid;
+child.stdin.end(); // Chrome 退出 = relay stdin 关闭
 await new Promise((r) => child.on("exit", r));
-assert.equal(fs.existsSync(SOCK), false, "holder 退出后 socket 应被删除");
-console.log("shutdown ok; cdp methods seen:", ext.cdpLog.length);
+await new Promise((r) => setTimeout(r, 300));
+assert.equal(fs.existsSync(SOCK), true, "relay 退出后 daemon 应仍在运行");
+console.log("relay exit keeps daemon ok; cdp methods seen:", ext.cdpLog.length);
+
+// 扩展重连：新 relay 接入同一个 daemon，pid 不变，状态仍在
+const relay2 = spawn(process.execPath, [RELAY], { env, stdio: ["pipe", "pipe", "pipe"], cwd: SRC });
+fakeExtension(relay2);
+relay2.stdin.write(frame({ type: "hello", protocolVersion: 1, chromeVersion: "Chrome/e2e2" }));
+await waitFor(async () => (await rpc("ping")).chrome === "Chrome/e2e2");
+assert.equal((await rpc("ping")).pid, daemonPid, "重连后 daemon pid 不变");
+console.log("reconnect keeps daemon ok");
+relay2.stdin.end();
+await new Promise((r) => relay2.on("exit", r));
+closeRpc();
+
+process.kill(daemonPid, "SIGTERM");
+await waitFor(async () => !fs.existsSync(SOCK));
+assert.equal(fs.existsSync(path.join(SESSION, "ext.sock")), false, "daemon 退出后扩展 socket 应被删除");
+console.log("shutdown ok");
 console.log("E2E OK");
 fs.rmSync(HOME, { recursive: true, force: true });

@@ -14,6 +14,8 @@ export const SESSION_SOCK_IS_FILE = process.platform !== "win32";
 export const SESSION_SOCK = SESSION_SOCK_IS_FILE
   ? path.join(SESSION_DIR, "sock")
   : `\\\\.\\pipe\\yodo-${createHash("sha256").update(os.homedir()).digest("hex").slice(0, 12)}`;
+/** relay 与 daemon 之间的扩展通道；win32 用独立 named pipe。 */
+export const SESSION_EXT_SOCK = SESSION_SOCK_IS_FILE ? path.join(SESSION_DIR, "ext.sock") : `${SESSION_SOCK}-ext`;
 export const SESSION_PID_FILE = path.join(SESSION_DIR, "pid");
 export const SESSION_LOG = path.join(SESSION_DIR, "log.jsonl");
 

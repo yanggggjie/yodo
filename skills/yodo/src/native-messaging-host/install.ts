@@ -16,6 +16,7 @@ const YODO_HOME = path.join(os.homedir(), ".yodo");
 export const DEPLOYED_SRC = path.join(YODO_HOME, "src");
 export const EXTENSION_DIR = path.join(DEPLOYED_SRC, "chrome-extension");
 export const HOLDER_ENTRY = path.join(DEPLOYED_SRC, "holder.ts");
+export const RELAY_ENTRY = path.join(DEPLOYED_SRC, "native-messaging-host", "relay.ts");
 const WIN_REG_KEY = `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`;
 
 export function launcherPath(): string {
@@ -46,14 +47,14 @@ export function installNativeHost(nodePath: string = process.execPath): string {
   const launcher = launcherPath();
   fs.mkdirSync(path.dirname(launcher), { recursive: true });
   if (process.platform === "win32") {
-    fs.writeFileSync(launcher, `@echo off\r\n"${nodePath}" "${HOLDER_ENTRY}" %*\r\n`);
+    fs.writeFileSync(launcher, `@echo off\r\n"${nodePath}" "${RELAY_ENTRY}" %*\r\n`);
   } else {
-    fs.writeFileSync(launcher, `#!/bin/sh\nexec "${nodePath}" "${HOLDER_ENTRY}" "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(launcher, `#!/bin/sh\nexec "${nodePath}" "${RELAY_ENTRY}" "$@"\n`, { mode: 0o755 });
     fs.chmodSync(launcher, 0o755);
   }
   const manifest = {
     name: NATIVE_HOST_NAME,
-    description: "yodo native messaging host (holder)",
+    description: "yodo native messaging host (relay)",
     path: launcher,
     type: "stdio",
     allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],

@@ -4,7 +4,7 @@ import { connectChrome, disconnectChrome, ExtensionLink, frame, parseFrames, set
 import { finishRecord, liveRecordName, startRecord } from "./record/index.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
 import { HANDSHAKE_GUIDES, HANDSHAKE_MARKS, RPC_ERRORS, handshakeStatusFromError, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
-import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_EXT_SOCK, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
 import { createLogger, setLogFile } from "./utils/logger.ts";
 
 const logger = createLogger("holder");
@@ -17,7 +17,20 @@ let chromeVersion = "";
 let chromeReady: Promise<void> | null = null;
 let recordBusy = false;
 let shuttingDown = false;
-let server: net.Server | undefined;
+let server: net.Server | null = null;
+let extServer: net.Server | null = null;
+let extSocket: net.Socket | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+/** 扩展链路对象在 daemon 生命周期内只有一个；relay 断开只 detach，不 close。 */
+const link = new ExtensionLink();
+setActiveLink(link);
+// 页面事件按 sessionId（pageId）推给当前 run 的 client；client 自己按 method 过滤。
+link.onAny((method, params, sessionId) => {
+  if (!activeRunConn || !sessionId) return;
+  activeRunConn.write({ jsonrpc: "2.0", method: "cdp.event", params: { sessionId, method, params } });
+});
+/** ponytail: 没有 relay 且没有 run/record 超过 10 分钟才退出；忙时不重试，下次 relay 断开再判断。 */
+const IDLE_EXIT_MS = 10 * 60_000;
 
 type ConnState = { runActive: boolean; write: (message: JsonRpcResponse | JsonRpcNotification, priority?: boolean) => void };
 let activeRunConn: ConnState | null = null;
@@ -26,7 +39,10 @@ function pagesOf(ctx: CdpContext): number { return ctx.pages().filter((page) => 
 function pingBody() { return { pid: process.pid, chrome: chromeVersion, pages: context ? pagesOf(context) : 0, record: liveRecordName() }; }
 function warnCatch(label: string): (error: unknown) => void { return (error) => logger.warn(label, { err: error instanceof Error ? error.message : String(error) }); }
 async function tryConnectChrome(): Promise<void> { const connected = await connectChrome(); browser = connected.browser; context = connected.context; chromeVersion = await browser.version().catch(() => "Google Chrome (CDP)"); browser.on("disconnected", () => void shutdown(1)); }
-async function ensureChrome(): Promise<void> { if (!chromeReady) chromeReady = tryConnectChrome(); await chromeReady; if (!browser || !context) throw new Error("holder 尚未连上 Chrome"); }
+async function ensureChrome(): Promise<void> {
+  if (!browser) { chromeReady ??= tryConnectChrome().catch((error) => { chromeReady = null; throw error; }); await chromeReady; }
+  if (!browser || !context) throw new Error("holder 尚未连上 Chrome");
+}
 
 async function settleIdle(): Promise<void> {
   if (!browser || !context || liveRecordName()) return;
@@ -49,7 +65,7 @@ function paramsOf(req: JsonRpcRequest): Record<string, unknown> { return req.par
 /** 扩展里没有 browser 级会话：connection / browser scope 发出的命令没有 tab，会被 raw.send 拒绝。 */
 
 async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> {
-  if (req.method === "ping") { if (chromeReady) await chromeReady; return pingBody(); }
+  if (req.method === "ping") { if (chromeReady) await chromeReady.catch(() => {}); return pingBody(); }
   await ensureChrome();
   browser!.raw.rpc = { id: req.id, op: req.method };
   try {
@@ -108,13 +124,27 @@ function onConnection(socket: net.Socket): void {
   socket.on("error", () => {});
 }
 
-async function shutdown(code: number): Promise<void> { if (shuttingDown) return; shuttingDown = true; if (liveRecordName()) await finishRecord("disconnect").catch(warnCatch("disconnect flush")); await context?.closeRunWindow().catch(warnCatch("closeRunWindow")); await settleIdle().catch(warnCatch("settleIdle")); server?.close(); if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); fs.rmSync(SESSION_PID_FILE, { force: true }); if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome")); process.exit(code); }
+async function shutdown(code: number): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info("holder exit", { code });
+  if (liveRecordName()) await finishRecord("disconnect").catch(warnCatch("disconnect flush"));
+  await context?.closeRunWindow().catch(warnCatch("closeRunWindow"));
+  await settleIdle().catch(warnCatch("settleIdle"));
+  server?.close();
+  extServer?.close();
+  extSocket?.destroy();
+  if (SESSION_SOCK_IS_FILE) { fs.rmSync(SESSION_SOCK, { force: true }); fs.rmSync(SESSION_EXT_SOCK, { force: true }); }
+  fs.rmSync(SESSION_PID_FILE, { force: true });
+  if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome"));
+  process.exit(code);
+}
 
-/** 已有 holder 在监听 socket 时返回 true：新 holder 不应覆盖它。 */
-function socketAlive(): Promise<boolean> {
+/** 已有活的 daemon 在监听时返回 true：新 daemon 不应覆盖它。 */
+function socketAlive(sock: string): Promise<boolean> {
   return new Promise((resolve) => {
-    if (SESSION_SOCK_IS_FILE && !fs.existsSync(SESSION_SOCK)) { resolve(false); return; }
-    const probe = net.connect(SESSION_SOCK);
+    if (SESSION_SOCK_IS_FILE && !fs.existsSync(sock)) { resolve(false); return; }
+    const probe = net.connect(sock);
     const done = (ok: boolean): void => { probe.destroy(); resolve(ok); };
     probe.once("connect", () => done(true));
     probe.once("error", () => done(false));
@@ -122,51 +152,80 @@ function socketAlive(): Promise<boolean> {
   });
 }
 
-/** stdout 是 native messaging 通道：任何写 stdout 的代码都会破坏协议，所以 console.log 改走 stderr。 */
-function startExtensionLink(): Promise<void> {
-  console.log = (...args: unknown[]) => console.error(...args);
-  const link = new ExtensionLink();
-  setActiveLink(link);
-  // 页面事件按 sessionId（pageId）推给当前 run 的 client；client 自己按 method 过滤。
-  link.onAny((method, params, sessionId) => {
-    if (!activeRunConn || !sessionId) return;
-    activeRunConn.write({ jsonrpc: "2.0", method: "cdp.event", params: { sessionId, method, params } });
-  });
-  link.write = (message) => { process.stdout.write(frame(message)); };
-  link.onClose(() => void shutdown(0));
+/** 抢占 socket：EADDRINUSE 且对方还活着时返回 null，本进程应退出；残留文件则删掉后重试。 */
+async function listenUnique(sock: string, onConn: (socket: net.Socket) => void): Promise<net.Server | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const srv = net.createServer(onConn);
+    try {
+      await new Promise<void>((resolve, reject) => { srv.once("error", reject); srv.listen(sock, () => { srv.off("error", reject); resolve(); }); });
+      if (SESSION_SOCK_IS_FILE) fs.chmodSync(sock, 0o600);
+      return srv;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE" || (await socketAlive(sock))) return null;
+      if (SESSION_SOCK_IS_FILE) fs.rmSync(sock, { force: true });
+    }
+  }
+  return null;
+}
+
+/** relay 连上来：同一时间只保留一个扩展链路，新连接替换旧连接。 */
+function onRelay(sock: net.Socket): void {
   let buffer: Buffer = Buffer.alloc(0);
   let helloDone = false;
-  return new Promise<void>((resolve, reject) => {
-    process.stdin.on("data", (chunk: Buffer) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      try {
-        buffer = parseFrames(buffer, (msg) => {
-          if (!helloDone) {
-            if (msg.type !== "hello") return;
-            link.hello(msg);
-            helloDone = true;
-            resolve();
-            return;
-          }
-          link.receive(msg);
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-    process.stdin.on("end", () => void shutdown(0));
+  sock.on("data", (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    try {
+      buffer = parseFrames(buffer, (msg) => {
+        if (!helloDone) {
+          if (msg.type !== "hello") return;
+          // 只有合法 hello 才替换旧连接：单例探测等无效连接不能把正在用的扩展踢掉。
+          const previous = extSocket;
+          extSocket = sock;
+          clearTimeout(idleTimer);
+          previous?.destroy();
+          link.hello(msg);
+          chromeVersion = link.chromeVersion;
+          link.attach((out) => sock.write(frame(out)));
+          helloDone = true;
+          logger.info("extension connected");
+          void ensureChrome().catch(warnCatch("connect on hello"));
+          return;
+        }
+        link.receive(msg);
+      });
+    } catch (error) {
+      logger.error("扩展消息处理失败", error);
+      sock.destroy();
+    }
   });
+  sock.on("close", () => {
+    if (extSocket !== sock) return;
+    extSocket = null;
+    link.detach();
+    logger.info("extension link closed");
+    if (activeRunConn) void runEnd().catch(warnCatch("run cleanup on relay close"));
+    idleTimer = setTimeout(() => { if (!extSocket && !activeRunConn && !liveRecordName()) void shutdown(0); }, IDLE_EXIT_MS);
+    idleTimer.unref();
+  });
+  sock.on("error", () => {});
 }
 
 export async function runHolder(): Promise<void> {
-  fs.mkdirSync(SESSION_DIR, { recursive: true }); setLogFile(SESSION_LOG); fs.rmSync(RECORDING_DIR, { recursive: true, force: true }); ensureHomeLayout();
-  if (await socketAlive()) { logger.warn("已有 holder 在运行，本进程退出"); process.exit(0); }
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  setLogFile(SESSION_LOG);
+  ensureHomeLayout();
+  extServer = await listenUnique(SESSION_EXT_SOCK, onRelay);
+  if (!extServer) { logger.warn("已有 holder 在运行，本进程退出"); process.exit(0); }
+  server = await listenUnique(SESSION_SOCK, onConnection);
+  if (!server) { logger.warn("CLI socket 被占用，本进程退出"); extServer.close(); if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_EXT_SOCK, { force: true }); process.exit(0); }
+  fs.rmSync(RECORDING_DIR, { recursive: true, force: true });
   fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 });
-  process.on("SIGINT", () => void shutdown(0)); process.on("SIGTERM", () => void shutdown(0)); process.on("uncaughtException", (error) => { logger.error("uncaughtException", error); void shutdown(1); }); process.on("unhandledRejection", (error) => { logger.error("unhandledRejection", error); void shutdown(1); });
-  try { await startExtensionLink(); } catch (error) { logger.error("扩展握手失败", error); await shutdown(1); return; }
-  if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true }); server = net.createServer(onConnection); await new Promise<void>((resolve, reject) => { server!.listen(SESSION_SOCK, resolve); server!.on("error", reject); }); if (SESSION_SOCK_IS_FILE) fs.chmodSync(SESSION_SOCK, 0o600);
-  chromeReady = tryConnectChrome(); try { await chromeReady; } catch (error) { const status = handshakeStatusFromError(error); if (status) logger.warn(HANDSHAKE_MARKS[status]); else logger.error("connect failed", error); await shutdown(1); return; }
+  process.on("SIGINT", () => void shutdown(0));
+  process.on("SIGTERM", () => void shutdown(0));
+  process.on("uncaughtException", (error) => { logger.error("uncaughtException", error); void shutdown(1); });
+  process.on("unhandledRejection", (error) => { logger.error("unhandledRejection", error); void shutdown(1); });
+  logger.info("daemon start", { pid: process.pid });
   await new Promise(() => {});
 }
 
-runHolder().catch((error) => { const status = handshakeStatusFromError(error); if (status) logger.warn(HANDSHAKE_MARKS[status]); else logger.error("holder start failed", error); void shutdown(1); });
+runHolder().catch((error) => { logger.error("holder start failed", error); process.exit(1); });

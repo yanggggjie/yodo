@@ -28,13 +28,14 @@ type Handler = (params: unknown, sessionId?: string) => void;
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer?: ReturnType<typeof setTimeout> };
 
 export class ExtensionLink {
-  /** 由 holder 注入：把一条消息写到 native host stdout。 */
+  /** 由 holder 注入：把一条消息写到当前 relay 连接。 */
   write: (message: Record<string, unknown>) => void = () => {};
   readonly raw: RawCdpConnection;
   readonly ops: TabOps;
   chromeVersion = "";
   private nextId = 1;
   private closed = false;
+  private detached = false;
   private pending = new Map<number, Pending>();
   private listeners = new Map<string, Set<Handler>>();
   private anyListeners = new Set<(method: string, params: unknown, sessionId?: string) => void>();
@@ -57,7 +58,13 @@ export class ExtensionLink {
           timer.unref?.();
         }
         this.pending.set(id, { resolve, reject, timer });
-        this.write({ id, ...msg });
+        try {
+          this.write({ id, ...msg });
+        } catch (error) {
+          if (timer) clearTimeout(timer);
+          this.pending.delete(id);
+          reject(error as Error);
+        }
       });
     };
 
@@ -101,7 +108,7 @@ export class ExtensionLink {
         this.closeHandlers.add(handler);
         return () => this.closeHandlers.delete(handler);
       },
-      isClosed: () => this.closed,
+      isClosed: () => this.closed || this.detached,
       close: async () => this.close(),
     };
   }
@@ -130,6 +137,23 @@ export class ExtensionLink {
       throw new Error(`扩展协议版本 ${String(msg.protocolVersion)} 与 holder ${PROTOCOL_VERSION} 不一致`);
     }
     this.chromeVersion = String(msg.chromeVersion ?? "");
+  }
+
+  /** 扩展链路接上（relay 发来 hello 之后）。 */
+  attach(write: (message: Record<string, unknown>) => void): void {
+    this.write = write;
+    this.detached = false;
+  }
+
+  /** 扩展断开：未完成的请求立即失败，但对象保留，等下一次 attach。 */
+  detach(): void {
+    this.detached = true;
+    this.write = () => { throw new Error("扩展未连接"); };
+    for (const [id, entry] of this.pending) {
+      if (entry.timer) clearTimeout(entry.timer);
+      this.pending.delete(id);
+      entry.reject(new Error("扩展已断开"));
+    }
   }
 
   onClose(handler: () => void): void {

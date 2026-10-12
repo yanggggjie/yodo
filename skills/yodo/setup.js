@@ -7,8 +7,8 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
-import { stopCurrentHolder } from "./src/cli/spawn.ts";
 import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
+import { revealPath } from "./src/cli/reveal.ts";
 import { ensureHomeLayout } from "./src/store/layout.ts";
 import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
 
@@ -21,11 +21,8 @@ if (!Number.isFinite(major) || major < 24) {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, "src");
 const DEST = path.join(os.homedir(), ".yodo", "src");
-const SESSION = path.join(os.homedir(), ".yodo", "session");
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
-await stopCurrentHolder();
-fs.rmSync(SESSION, { recursive: true, force: true });
 copyRuntime(SRC, DEST);
 fs.copyFileSync(path.join(HERE, "LICENSE"), path.join(DEST, "LICENSE"));
 console.log(`yodo src 拷贝 → ${DEST}`);
@@ -58,6 +55,7 @@ if (!fs.existsSync(path.join(DEST, DEPS_MARKER))) {
 installNativeHost(process.execPath);
 console.log(`native messaging host 已注册 → ${manifestPath()}`);
 console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
+if (!process.env.YODO_NO_REVEAL) revealPath(EXTENSION_DIR);
 
 ensureHomeLayout();
 writeShim(process.execPath);

@@ -8,7 +8,7 @@ import {
 } from "../utils/constants.ts";
 import { isPidAlive, readSessionPid } from "./spawn.ts";
 import { chromeRunning } from "../browser/connect.ts";
-import { EXTENSION_ID, HOLDER_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
+import { EXTENSION_ID, HOLDER_ENTRY, RELAY_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
 
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
@@ -52,7 +52,7 @@ export function handleDoctor(): void {
   if (!manifestOk) process.exitCode = 1;
   if (manifestOk) {
     const launcher = launcherPath();
-    const launcherOk = fs.existsSync(launcher) && fs.existsSync(HOLDER_ENTRY);
+    const launcherOk = fs.existsSync(launcher) && fs.existsSync(HOLDER_ENTRY) && fs.existsSync(RELAY_ENTRY);
     console.log(`  launcher ${launcherOk ? "ok" : "缺失或 holder 入口缺失"} ${launcher}`);
     if (!launcherOk) process.exitCode = 1;
     try {

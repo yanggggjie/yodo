@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-pack-"));
-const env = { ...process.env, HOME, USERPROFILE: HOME };
+const env = { ...process.env, HOME, USERPROFILE: HOME, YODO_NO_REVEAL: "1" };
 
 function findSkillDir() {
   const hits = [];
@@ -83,7 +83,7 @@ try {
 
   const doctor = spawnSync(
     process.execPath,
-    [path.join(dest, "bin", "doctor.js")],
+    [path.join(dest, "cli", "yodo.ts"), "doctor"],
     { env, encoding: "utf8" },
   );
   assert.equal(doctor.status, 0, `doctor 失败：${doctor.stderr || doctor.stdout}`);
