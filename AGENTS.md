@@ -38,6 +38,42 @@ npm run verify:pack
 | `npm test` | 按文件名顺序逐个运行 `*.selfcheck.ts` |
 | `npm run verify:pack` | 使用隔离 HOME 执行真实的 `skills add`、setup 和 doctor |
 
+### 2.3 dev：本地验证工具
+
+`dev` 服务于本地修改代码、debug、调算法，目的是拿到真实数据和真实现象，不是 CI，也不是通过 / 失败。设计与分步见 [plan/dev-tools.md](plan/dev-tools.md)。
+
+**克制原则**（违反任何一条，先删再加）：
+
+1. **体量上限**：`dev` 相关代码（`skills/yodo/src/dev/`、`scripts/dev/`，不含 `*.selfcheck.*`）总量不超过生产代码的 15%。度量方式：生产代码为 `skills/yodo/src` 下除自检、`dev/` 外的 `.ts/.js/.mjs` 行数。
+2. **可整体删除**：生产代码里对 `dev` 只允许一行式调用，不放逻辑。删掉 `src/dev/` 和这些调用后，应用行为完全不变。
+3. **零新增运行时依赖**。本机开发工具只用于本地，不进发布内容。
+4. **每个能力必须对应一个真实发生过的痛点**，写进 plan。"将来可能用到"不算理由。
+5. **一进一出**：新增一个机制前，先评估能不能删掉旧的某个。
+6. **默认关闭，关闭时零行为差异。**
+
+另外：
+- 不新增 hub、事件目录、探针、`dev.eval` 等通用机制。需要进入运行中的 holder 时，用 Node 自带的 inspector（`kill -USR1 <holder pid>`）。plan 的"不做的事"列出了每一项以及重新考虑的条件。
+- `dev` 不出现在 usage 和 SKILL.md，只写在这里。
+
+**用法**：
+
+- 开关是标记文件：`touch ~/.yodo/session/dev` 开启，`rm ~/.yodo/session/dev` 关闭。holder 每次收到 `dev.*` 请求时检查，不需要重启。
+- `dev.pages`：列出 yodo 的页面（pageId、windowId、url、标题）。`record.start` 之后，录制页的标题是 `yodo record`。
+- `dev.cdp { pageId, method, params }`：对该页面发 CDP，包括录制窗口。拒绝 `*.disable`、`Target.*`、`Browser.*`。生产环境的 `cdp.send` 仍然只能在 run 中使用。
+- 脚本通过现有的 `sessionRpc` 调用这些 method。`skills/yodo/src/dev/driver.ts` 的 `DevPage` 用 `Input.*` 模拟用户操作（`goto`、`click`、`type`、`scroll`、`waitFor`）。录制器只认 `isTrusted` 的事件，所以不能用 task-lib 的 `click`、`fill`。
+- 流水线：`runPipeline()` 返回每一级的输入数、输出数和丢弃原因；录制结束时写一行 `pipeline N → M` 日志，`data.stages` 里是各级明细。
+
+```bash
+touch ~/.yodo/session/dev
+node scripts/dev/record.mjs [场景.mjs]   # 起夹具 → 录制 → 模拟演示 → 停止，打印汇总并与上一次比较
+node scripts/dev/replay.mjs <录制名>      # 用 dev 模式保存的原始事件离线重放流水线，不需要 Chrome
+rm ~/.yodo/session/dev
+```
+
+`record.mjs` 产生的录制会出现在 `~/.yodo/record/`（以场景名开头），用完自行删除。
+
+**安全**：dev 模式下保存的原始事件是脱敏**之前**的数据，可能含密码和 token。它们只写到 `~/.yodo/dev/`（权限 0600），不进 `record/`，不进发布内容；用完 `rm -rf ~/.yodo/dev`。
+
 ## 3. 分发与发布
 
 ### 3.1 Skill payload

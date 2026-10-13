@@ -14,7 +14,8 @@ import {
   type CdpNetworkRecorder,
   type InjectRecorder,
 } from "./collect.ts";
-import { loadAdblockEngine, processTimelinePipeline } from "./pipeline.ts";
+import { loadAdblockEngine, runPipeline } from "./pipeline.ts";
+import { saveRaw } from "../dev/raw.ts";
 import {
   formatIdleStdout,
   formatRecordStartStdout,
@@ -147,8 +148,9 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
   }
 
   try {
-    const processed = processTimelinePipeline(current.events, adblockEngine);
-    logger.info(`pipeline ${current.events.length} → ${processed.length}`);
+    saveRaw(current.name, current.events, domStore?.events ?? []);
+    const { events: processed, stages } = runPipeline(current.events, adblockEngine);
+    logger.info(`pipeline ${current.events.length} → ${processed.length}`, { data: { stages } });
     const domEvents = domStore?.events ?? [];
     const flushResult = await writeArtifacts(current.recordDir, processed, domEvents, current.name);
     const missing = domStore ? pagesMissingScript(current.events, domStore.ready) : [];

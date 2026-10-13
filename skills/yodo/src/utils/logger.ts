@@ -53,6 +53,7 @@ function extraFields(meta?: unknown): Record<string, unknown> {
   if (typeof o.id === "string") out.id = o.id;
   if (typeof o.method === "string") out.method = o.method;
   if (typeof o.ms === "number") out.ms = o.ms;
+  if (o.data !== undefined) out.data = o.data;
   if (typeof o.err === "string") out.err = o.err;
   else if (o.err instanceof Error) out.err = o.err.stack || o.err.message;
   return out;

@@ -5,6 +5,7 @@ import {
   dedupeTimeline,
   loadAdblockEngine,
   processTimelinePipeline,
+  runPipeline,
   shouldSkipRecordUrl,
 } from "./pipeline.ts";
 import type { RawEvent, RawRequest } from "./types.ts";
@@ -145,5 +146,14 @@ const reqs = once.filter((e): e is RawRequest => "requestType" in e);
 assert.ok(reqs.every((r) => r.status === undefined || (r.status >= 200 && r.status < 300)));
 assert.ok(!reqs.some((r) => r.url.bareUrl.includes("hm.baidu.com")));
 assert.ok(once.every((e) => "requestType" in e));
+
+// runPipeline：结果与 processTimelinePipeline 一致；每一级的数量首尾相接，丢弃数与差值一致
+const { events: explained, stages } = runPipeline(raw, engine);
+assert.deepEqual(explained, once);
+assert.deepEqual(stages.map((s) => s.name), ["success-only", "adblock", "sanitize", "dedupe"]);
+assert.equal(stages[0]!.in, raw.length);
+assert.equal(stages.at(-1)!.out, once.length);
+for (let i = 1; i < stages.length; i++) assert.equal(stages[i]!.in, stages[i - 1]!.out, `${stages[i]!.name} 的输入应等于上一级的输出`);
+for (const s of stages) assert.equal(Object.values(s.dropped).reduce((a, b) => a + b, 0), s.in - s.out, `${s.name} 的丢弃数应等于 in - out`);
 
 console.log("record pipeline selfcheck ok");

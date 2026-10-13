@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import { connectChrome, disconnectChrome, ExtensionLink, frame, parseFrames, setActiveLink, type CdpBrowser, type CdpContext, type CdpPage } from "./browser/index.ts";
 import { finishRecord, liveRecordName, startRecord } from "./record/index.ts";
+import { devRpc } from "./dev/rpc.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
 import { HANDSHAKE_GUIDES, RPC_ERRORS, handshakeStatusFromError, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
 import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_EXT_SOCK, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
@@ -73,6 +74,7 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
   await reconciled;
   const params = paramsOf(req);
   switch (req.method) {
+    case "dev.pages": case "dev.cdp": return devRpc(req.method, params, browser!.raw, context!);
     case "run.begin": {
       if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
       const record = liveRecordName(); if (record) throw Object.assign(new Error(`录制 ${record} 正在进行，请先 record stop 或 record abort`), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record" } });
