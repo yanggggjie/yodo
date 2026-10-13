@@ -130,13 +130,13 @@ ping
 
 `src/chrome-extension/` 是薄层 CDP 代理，约 220 行。协议见 `src/browser/extension.ts`。
 
-- 只操作由 holder 创建的窗口和 tab，以及 opener 属于 yodo 的新 tab。
+- 只操作由 holder 创建的窗口和 tab，以及两类新 tab：opener 属于 yodo 的 tab；开在录制窗口里的 tab（用户在录制窗口自己按 Cmd+T 开的 tab 没有 opener）。`openWindow` 的 `kind: "record"` 标记录制窗口，run 窗口不放宽。
 - 操作：`openWindow`、`openTab`、`closeTab`、`closeWindow`、`listOwned`、`windowOf`、`attach`、`detach`、`send`。
 - 事件：`debuggerEvent`、`debuggerDetach`、`tab.created`、`tab.updated`、`tab.removed`。
 
 ### 4.4 窗口
 
-- 录制窗：`openWindow({focused: true})`，tab 标题 `yodo record`。stop、abort 或 holder 退出时关闭整扇窗口。
+- 录制窗：`openWindow({focused: false})`，不抢用户焦点，tab 标题 `yodo record`；agent 要告诉用户切换到这个窗口。stop、abort 或 holder 退出时关闭整扇窗口。
 - run 窗：holder 记录 `runWindowId`，窗口与一个锚点 tab（`about:blank`，标题 `yodo run`）同时存在。锚点 tab 保留，保证窗口存活。
 - 每次 run 新开一个 tab，结束时 detach 并关闭它。不复用 tab。
 - run 窗被用户关闭后，下次 run 静默重建。holder 退出时关闭 run 窗。
@@ -148,8 +148,16 @@ ping
 - `record start` 在 `~/.yodo/session/recording/<name>/` 下生成录制；`record stop` 移入 `~/.yodo/record/<name>/`。
 - 录制输出：`timeline.jsonl`（request 行与 action 行）、请求文件与响应文件。没有 `DOMTimeline.jsonl`，没有 `final-state`，没有 `eventId`。
 - action 类型：`click`、`value`、`checked`、`scroll`、`navigation`。`submit` 与 `keydown` 不记录。
+- 页面脚本（`record/inject.js`）在页面里直接产出 timeline 需要的字段：`selector`（候选依次为稳定的 `id`、`data-testid` 等、`name`、`aria-label`、`placeholder`、稳定的 class，要求在文档里唯一；都不唯一时用 `:nth-of-type` 拼路径）、`role`、`name`（`aria-labelledby` → `aria-label` → `<label>` → `placeholder` → 自己的文字，最长 80 字符；没有可交互元素的点击只取元素自己的文字）、输入值、滚动量。点到按钮里的图标算点了按钮，点 `<label>` 算点了它控制的输入框。宿主不再采集元素的祖先、子节点等整份描述；判断是不是同一控件只比较 `selector`。
+- 脚本的注入：`Page.addScriptToEvaluateOnNewDocument` 只对之后新建的文档生效，所以 attach 时还要对已存在的 frame（含 iframe）用 `Page.createIsolatedWorld` + `Runtime.evaluate` 立刻补注入，否则晚 attach 的页面（尤其单页应用）整页录不到动作。脚本加载后发 `ready`；stop 时有网络请求却没收到 `ready` 的页面，进入 `record stop` 的 `warnings`。
+- 单页应用的路由变化（`Page.navigatedWithinDocument`）记为 `navigation`；iframe 里的导航不记录。
+- 验证：`record/fixtures/dom-events.json` 是在真实 Chrome 里用可信的鼠标、键盘输入抓到的页面事件，其中的 `ax` 是同一页面上 Chrome 无障碍树给出的 role 和 name，`collect.selfcheck.ts` 逐个对照。
 - 脱敏保留；adblock 过滤保留。
-- `record stop` 输出 `status`、`name`、`recordDir`、`timeline`。
+- 网络采集分两层：`record/collect.ts` 的采集端只做 attach 和所有 I/O（开启域、取响应体、读页面 HTML），事件交给 `record/requests.ts` 的 `RequestAssembler` 拼成请求记录。拼装器不做任何 I/O，只有一个入口 `feed(事件)`；需要取响应体或补抓主文档时返回一个动作，采集端执行后再把结果作为 `yodo.body`、`yodo.snapshot` 事件喂回去。设置 `YODO_RECORD_LOG=<路径>` 时，stop 时把喂给拼装器的全部事件写成 JSON（含未脱敏的数据，默认不记录），可直接作为测试夹具，放进 `record/fixtures/` 即可回放。
+- 补抓的主文档（`late: true`）：页面在开始采集之前就已经加载完时，读取当前页面的 HTML 补一条主文档。`dropIncompleteRequests` 不会删除它。
+- 录制期间不处理 JS 对话框（`alert`、`confirm`、`prompt`、`beforeunload`），由用户在页面里自己选，不自动点「确定」。
+- 录制窗口里用户自己新开的 tab 会被纳入：扩展纳入后宿主按窗口规则 attach。新标签页是 `chrome://` 页面，无法 attach；用户在里面首次导航后才 attach，第一次文档请求可能记成补抓的主文档（`late: true`）。
+- `record stop` 输出 `status`、`name`、`recordDir`、`timeline`；有页面的动作没录到时多一个 `warnings` 数组。
 
 ### 4.6 存储与安装
 

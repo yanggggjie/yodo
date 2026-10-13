@@ -215,7 +215,7 @@ export class CdpContext {
   }
 
   async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
-    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false });
+    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false, kind: "record" });
     try {
       const page = await this.attachTarget(String(tabId));
       await page.evaluate(`document.title = ${JSON.stringify(RECORD_WINDOW_TITLE)}`);

@@ -15,30 +15,33 @@ let retryTimer = null;
 // storage.session：同一浏览器会话内 service worker 重启后 id 可信，但扩展刷新会清空它。
 // storage.local：扩展刷新后仍在，但 id 在浏览器重启后会被复用，所以只在窗口里仍有标题为 yodo 的 tab 时才信任。
 const YODO_TITLES = new Set(["yodo run", "yodo record"]);
-const owned = { windows: new Set(), tabs: new Set() };
+// recordWindows：录制窗口。用户在里面自己开的新 tab（没有 opener）也要纳入，run 窗口不放宽。
+const owned = { windows: new Set(), tabs: new Set(), recordWindows: new Set() };
 const attached = new Set();
 
 const ready = restoreOwned();
 
 async function restoreOwned() {
-  const saved = await chrome.storage.session.get(["windows", "tabs"]);
+  const saved = await chrome.storage.session.get(["windows", "tabs", "recordWindows"]);
   for (const id of saved.windows ?? []) owned.windows.add(id);
   for (const id of saved.tabs ?? []) owned.tabs.add(id);
+  for (const id of saved.recordWindows ?? []) owned.recordWindows.add(id);
 
-  const persisted = await chrome.storage.local.get(["windows", "tabs"]);
+  const persisted = await chrome.storage.local.get(["windows", "tabs", "recordWindows"]);
   const persistedTabs = new Set(persisted.tabs ?? []);
   for (const windowId of persisted.windows ?? []) {
     if (owned.windows.has(windowId)) continue;
     const win = await chrome.windows.get(windowId, { populate: true }).catch(() => null);
     if (!win?.tabs?.some((tab) => YODO_TITLES.has(tab.title))) continue;
     owned.windows.add(windowId);
+    if ((persisted.recordWindows ?? []).includes(windowId)) owned.recordWindows.add(windowId);
     for (const tab of win.tabs) if (persistedTabs.has(tab.id)) owned.tabs.add(tab.id);
   }
   await saveOwned();
 }
 
 async function saveOwned() {
-  const value = { windows: [...owned.windows], tabs: [...owned.tabs] };
+  const value = { windows: [...owned.windows], tabs: [...owned.tabs], recordWindows: [...owned.recordWindows] };
   await Promise.all([chrome.storage.session.set(value), chrome.storage.local.set(value)]);
 }
 
@@ -110,6 +113,7 @@ async function runTab(name, args) {
       const win = await chrome.windows.create({ url: "about:blank", focused: !!args.focused, type: "normal" });
       const tab = win.tabs[0];
       owned.windows.add(win.id);
+      if (args.kind === "record") owned.recordWindows.add(win.id);
       owned.tabs.add(tab.id);
       await saveOwned();
       return { windowId: win.id, tabId: tab.id };
@@ -132,6 +136,7 @@ async function runTab(name, args) {
       requireWindow(args.windowId);
       await chrome.windows.remove(args.windowId).catch(() => {});
       owned.windows.delete(args.windowId);
+      owned.recordWindows.delete(args.windowId);
       await saveOwned();
       return {};
     }
@@ -190,10 +195,11 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   postToHost({ type: "tab", kind: "detached", tabId: source.tabId, reason });
 });
 
-// 由 yodo 的 tab 打开的新 tab（opener 在 owned 中）自动纳入，窗口同样纳入。
+// 自动纳入新 tab：opener 属于 yodo，或者它开在录制窗口里（用户自己按 Cmd+T 开的 tab 没有 opener）。窗口同样纳入。
 chrome.tabs.onCreated.addListener(async (tab) => {
   await ready;
-  if (tab.openerTabId == null || !owned.tabs.has(tab.openerTabId)) return;
+  const byOpener = tab.openerTabId != null && owned.tabs.has(tab.openerTabId);
+  if (!byOpener && !owned.recordWindows.has(tab.windowId)) return;
   owned.tabs.add(tab.id);
   owned.windows.add(tab.windowId);
   await saveOwned();
@@ -226,6 +232,7 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
   await ready;
   if (!owned.windows.has(windowId)) return;
   owned.windows.delete(windowId);
+  owned.recordWindows.delete(windowId);
   await saveOwned();
 });
 

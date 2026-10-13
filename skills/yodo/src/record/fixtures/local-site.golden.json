@@ -1,0 +1,341 @@
+[
+ {
+  "requestType": "mainDoc",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "nullblank",
+   "query": {}
+  },
+  "headers": {
+   "Upgrade-Insecure-Requests": "1",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": "<!doctype html><html><head><title>fixture</title></head><body>\n<a id=\"r\" href=\"/redirect\">redirect</a>\n<script>\nfetch('/api/small').then(r=>r.json());\nconst x = new XMLHttpRequest(); x.open('POST','/api/post'); x.setRequestHeader('content-type','application/json'); x.send(JSON.stringify({q:1}));\nfetch('/api/big').then(r=>r.text());\nfetch('/api/text').then(r=>r.text());\nfetch('/api/404');\nfetch('/api/fail').catch(()=>{});\n</script>\n<iframe src=\"/frame\"></iframe></body></html>",
+  "startedAt": 1791900378793,
+  "id": "request_001",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "text/html; charset=utf-8"
+  }
+ },
+ {
+  "requestType": "fetch",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/small",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": {
+   "ok": true
+  },
+  "startedAt": 1791900378844,
+  "id": "request_002",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "application/json"
+  }
+ },
+ {
+  "requestType": "xhr",
+  "method": "POST",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/post",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "content-type": "application/json",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": {
+   "q": 1
+  },
+  "responseBody": {
+   "posted": 1
+  },
+  "startedAt": 1791900378844,
+  "id": "request_003",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "application/json"
+  }
+ },
+ {
+  "requestType": "fetch",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/big",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": null,
+  "startedAt": 1791900378844,
+  "id": "request_004",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "application/json"
+  },
+  "responseBodyPath": {
+   "name": "request_004.response.json",
+   "size": 5311,
+   "sha1": "eb349d0e8646d0647cb22888d11a19c0e4cd810a"
+  }
+ },
+ {
+  "requestType": "fetch",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/text",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": "hello text",
+  "startedAt": 1791900378844,
+  "id": "request_005",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "text/plain"
+  }
+ },
+ {
+  "requestType": "fetch",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/404",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": {
+   "error": "nf"
+  },
+  "startedAt": 1791900378844,
+  "id": "request_006",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 404,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "application/json"
+  }
+ },
+ {
+  "requestType": "fetch",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/api/fail",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": null,
+  "startedAt": 1791900378844,
+  "id": "request_007",
+  "mainFrame": true,
+  "targetId": "101",
+  "errorText": "net::ERR_EMPTY_RESPONSE"
+ },
+ {
+  "requestType": "doc",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/frame",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/",
+   "query": {}
+  },
+  "headers": {
+   "Referer": "http://127.0.0.1:18765/",
+   "Upgrade-Insecure-Requests": "1",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": "<html><body>frame</body></html>",
+  "startedAt": 1791900378846,
+  "id": "request_008",
+  "mainFrame": false,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:18 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "text/html"
+  }
+ },
+ {
+  "requestType": "mainDoc",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/final",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/redirect",
+   "query": {}
+  },
+  "headers": {
+   "Upgrade-Insecure-Requests": "1",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": "<html><body>final</body></html>",
+  "startedAt": 1791900380332,
+  "id": "request_010",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:20 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "text/html"
+  }
+ },
+ {
+  "requestType": "mainDoc",
+  "method": "GET",
+  "url": {
+   "bareUrl": "http://127.0.0.1:18765/plain",
+   "query": {}
+  },
+  "frameUrl": {
+   "bareUrl": "http://127.0.0.1:18765/final",
+   "query": {}
+  },
+  "headers": {
+   "Upgrade-Insecure-Requests": "1",
+   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"macOS\""
+  },
+  "requestBody": null,
+  "responseBody": null,
+  "startedAt": 1791900381160,
+  "id": "request_011",
+  "mainFrame": true,
+  "targetId": "101",
+  "status": 200,
+  "responseHeaders": {
+   "Connection": "keep-alive",
+   "Date": "Tue, 13 Oct 2026 14:06:21 GMT",
+   "Keep-Alive": "timeout=5",
+   "Transfer-Encoding": "chunked",
+   "content-type": "text/plain"
+  },
+  "responseBodyUnavailableReason": "document-not-html"
+ }
+]

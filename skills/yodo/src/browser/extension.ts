@@ -14,7 +14,8 @@ import type { RawCdpConnection } from "./session.ts";
 export const PROTOCOL_VERSION = 1;
 
 export type TabOps = {
-  openWindow(opts: { focused: boolean }): Promise<{ windowId: number; tabId: number }>;
+  /** kind 为 "record" 时，用户在这个窗口里自己开的新 tab 也会被纳入；省略表示 run 窗口。 */
+  openWindow(opts: { focused: boolean; kind?: "run" | "record" }): Promise<{ windowId: number; tabId: number }>;
   openTab(opts: { windowId: number; url: string; active: boolean }): Promise<{ tabId: number }>;
   closeTab(tabId: number): Promise<void>;
   closeWindow(windowId: number): Promise<void>;

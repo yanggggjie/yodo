@@ -36,16 +36,20 @@ await new Promise<void>((resolve) => server.listen(SESSION_SOCK, resolve));
 const { yodo } = await import("./sdk.ts");
 const output: string[] = []; const original = console.log; console.log = (...args) => output.push(args.map(String).join(" "));
 process.argv[1] = path.join(TEST_HOME, "faketask.js");
+const stderrChunks: string[] = []; const originalStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk: unknown) => { stderrChunks.push(String(chunk)); return true; }) as typeof process.stderr.write;
 try {
   await yodo.run(async ({ page }) => {
-    assert.equal(page._targetId, "P1");
+    console.log("debug-line");
     const event = page.cdp.once("Page.loadEventFired");
     await page.cdp.send("Runtime.evaluate", { expression: "1" });
     await event;
     return "done";
   });
-} finally { console.log = original; server.close(); fs.rmSync(TEST_HOME, { recursive: true, force: true }); }
+} finally { console.log = original; process.stderr.write = originalStderrWrite; server.close(); fs.rmSync(TEST_HOME, { recursive: true, force: true }); }
 
 assert.equal(JSON.parse(output.join("\n")).status, "success");
+assert.ok(!output.join("\n").includes("debug-line"), "task 的 console 输出不能进 stdout");
+assert.ok(stderrChunks.join("").includes("debug-line"), "task 的 console 输出应走 stderr");
 assert.deepEqual(seen, ["ping", "run.begin", "cdp.send", "run.end"]);
 console.log("sdk selfcheck ok");

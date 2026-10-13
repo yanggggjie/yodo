@@ -113,6 +113,8 @@ export async function writeSemanticRequestFile(
 export type FlushResult = {
   name: string;
   recordDir: string;
+  /** 需要告诉用户的问题，例如某个页面的点击、输入、滚动没有录到。 */
+  warnings?: string[];
 };
 
 export async function writeArtifacts(
@@ -158,6 +160,7 @@ export function formatStopStdout(result: FlushResult): string {
       name: result.name,
       recordDir: result.recordDir,
       timeline: path.join(result.recordDir, "timeline.jsonl"),
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     },
     null,
     2,

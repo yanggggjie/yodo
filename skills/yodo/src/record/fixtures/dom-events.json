@@ -1,0 +1,349 @@
+{
+ "description": "本地控件页面在真实 Chrome 里用可信鼠标、键盘输入驱动时，注入脚本回传的 binding 载荷（含 iframe、shadow DOM、复选框 label、密码框、容器滚动、整页滚动、晚注入），以及页面内路由变化事件",
+ "tabId": "301",
+ "payloads": [
+  {
+   "kind": "ready",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902039326
+  },
+  {
+   "kind": "ready",
+   "frameUrl": "about:blank",
+   "mainFrame": false,
+   "startedAt": 1791902039338
+  },
+  {
+   "kind": "ready",
+   "frameUrl": "http://127.0.0.1:18766/frame-btn",
+   "mainFrame": false,
+   "startedAt": 1791902039387
+  },
+  {
+   "kind": "ready",
+   "frameUrl": "about:blank",
+   "mainFrame": false,
+   "startedAt": 1791902039392
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "保存",
+   "selector": "#save",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902040406
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "保存",
+   "selector": "#save",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902041055
+  },
+  {
+   "kind": "click",
+   "role": "textbox",
+   "name": "搜索词",
+   "selector": "#q",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902041668
+  },
+  {
+   "kind": "fill",
+   "role": "textbox",
+   "name": "搜索词",
+   "selector": "#q",
+   "value": "hello",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902041822
+  },
+  {
+   "kind": "change",
+   "role": "textbox",
+   "name": "搜索词",
+   "selector": "#q",
+   "value": "hello",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902042483
+  },
+  {
+   "kind": "click",
+   "role": "textbox",
+   "name": "城市",
+   "selector": "input[name=\"city\"]",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902042485
+  },
+  {
+   "kind": "fill",
+   "role": "textbox",
+   "name": "城市",
+   "selector": "input[name=\"city\"]",
+   "value": "上海",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902042641
+  },
+  {
+   "kind": "change",
+   "role": "textbox",
+   "name": "城市",
+   "selector": "input[name=\"city\"]",
+   "value": "上海",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902043304
+  },
+  {
+   "kind": "click",
+   "role": "textbox",
+   "name": "密码",
+   "selector": "input[name=\"pwd\"]",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902043307
+  },
+  {
+   "kind": "fill",
+   "role": "textbox",
+   "name": "密码",
+   "selector": "input[name=\"pwd\"]",
+   "valueRedacted": true,
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902043461
+  },
+  {
+   "kind": "change",
+   "role": "textbox",
+   "name": "密码",
+   "selector": "input[name=\"pwd\"]",
+   "valueRedacted": true,
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902044131
+  },
+  {
+   "kind": "click",
+   "role": "checkbox",
+   "name": "同意协议",
+   "selector": "#agree",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902044133
+  },
+  {
+   "kind": "click",
+   "role": "checkbox",
+   "name": "同意协议",
+   "selector": "#agree",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902044134
+  },
+  {
+   "kind": "change",
+   "role": "checkbox",
+   "name": "同意协议",
+   "selector": "#agree",
+   "checked": true,
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902044134
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "关闭",
+   "selector": "#close",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902045106
+  },
+  {
+   "kind": "click",
+   "role": "generic",
+   "name": "",
+   "selector": "div.tall",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902045291
+  },
+  {
+   "kind": "click",
+   "role": "generic",
+   "name": "卡片说明文字",
+   "selector": "p.desc",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902045718
+  },
+  {
+   "kind": "click",
+   "role": "heading",
+   "name": "卡片标题",
+   "selector": "div.card > h3",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902046330
+  },
+  {
+   "kind": "click",
+   "role": "link",
+   "name": "更多",
+   "selector": "#more",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902046947
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "影子按钮",
+   "selector": "#host",
+   "frameUrl": "http://127.0.0.1:18766/controls#more",
+   "mainFrame": true,
+   "startedAt": 1791902047565
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "路由",
+   "selector": "#push",
+   "frameUrl": "http://127.0.0.1:18766/controls#more",
+   "mainFrame": true,
+   "startedAt": 1791902048186
+  },
+  {
+   "kind": "scroll",
+   "role": "",
+   "name": "",
+   "scroll": {
+    "deltaX": 0,
+    "deltaY": 34.5,
+    "nearEnd": false
+   },
+   "frameUrl": "http://127.0.0.1:18766/controls/route",
+   "mainFrame": true,
+   "startedAt": 1791902048424
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "框架内按钮",
+   "selector": "#fb",
+   "frameUrl": "http://127.0.0.1:18766/frame-btn",
+   "mainFrame": false,
+   "startedAt": 1791902048807
+  },
+  {
+   "kind": "scroll",
+   "role": "",
+   "name": "",
+   "scroll": {
+    "deltaX": 0,
+    "deltaY": -34.5,
+    "nearEnd": false
+   },
+   "frameUrl": "http://127.0.0.1:18766/controls/route",
+   "mainFrame": true,
+   "startedAt": 1791902049212
+  },
+  {
+   "kind": "scroll",
+   "role": "generic",
+   "name": "",
+   "selector": "#list",
+   "scroll": {
+    "deltaX": 0,
+    "deltaY": 90,
+    "nearEnd": false
+   },
+   "frameUrl": "http://127.0.0.1:18766/controls/route",
+   "mainFrame": true,
+   "startedAt": 1791902049235
+  },
+  {
+   "kind": "scroll",
+   "role": "",
+   "name": "",
+   "scroll": {
+    "deltaX": 0,
+    "deltaY": 400,
+    "nearEnd": false
+   },
+   "frameUrl": "http://127.0.0.1:18766/controls/route",
+   "mainFrame": true,
+   "startedAt": 1791902049735
+  },
+  {
+   "kind": "ready",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902050620
+  },
+  {
+   "kind": "click",
+   "role": "button",
+   "name": "保存",
+   "selector": "#save",
+   "frameUrl": "http://127.0.0.1:18766/controls",
+   "mainFrame": true,
+   "startedAt": 1791902051390
+  }
+ ],
+ "navigatedWithinDocument": [
+  {
+   "frameId": "FBA8B4071AAA3C838EDD934983509BA0",
+   "navigationType": "fragment",
+   "url": "http://127.0.0.1:18766/controls#more"
+  },
+  {
+   "frameId": "FBA8B4071AAA3C838EDD934983509BA0",
+   "navigationType": "historyApi",
+   "url": "http://127.0.0.1:18766/controls/route"
+  }
+ ],
+ "ax": {
+  "#save": {
+   "role": "button",
+   "name": "保存"
+  },
+  "#more": {
+   "role": "link",
+   "name": "更多"
+  },
+  "#q": {
+   "role": "textbox",
+   "name": "搜索词"
+  },
+  "[name=city]": {
+   "role": "textbox",
+   "name": "城市"
+  },
+  "[name=pwd]": {
+   "role": "textbox",
+   "name": "密码"
+  },
+  "#agree": {
+   "role": "checkbox",
+   "name": "同意协议"
+  },
+  "[name=sort]": {
+   "role": "combobox",
+   "name": "排序"
+  },
+  "#close": {
+   "role": "button",
+   "name": "关闭"
+  }
+ }
+}

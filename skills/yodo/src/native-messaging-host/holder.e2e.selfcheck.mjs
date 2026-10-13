@@ -150,6 +150,14 @@ const recordFiles = fs.existsSync(path.join(HOME, ".yodo", "record")) ? fs.readd
 console.log("record dir entries:", recordFiles);
 closeRpc();
 
+// abort 后进行中的录制目录应被清掉，不能留到 daemon 下次启动
+await rpc("record.start", { name: "e2e-abort" });
+await rpc("record.abort");
+const recordingLeft = fs.existsSync(path.join(SESSION, "recording")) ? fs.readdirSync(path.join(SESSION, "recording")) : [];
+assert.deepEqual(recordingLeft, [], "abort 后进行中的录制目录应被清掉");
+console.log("record.abort cleanup ok");
+closeRpc();
+
 const daemonPid = ping.pid;
 child.stdin.end(); // Chrome 退出 = relay stdin 关闭
 await new Promise((r) => child.on("exit", r));

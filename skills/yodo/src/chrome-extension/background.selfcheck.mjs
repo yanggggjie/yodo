@@ -121,6 +121,29 @@ const ids = last().result.tabs.map((t) => t.tabId);
 assert.equal(typeof last().result.tabs[0].title, "string", "listOwned 带 title，holder 靠它识别 yodo 的窗口");
 assert.ok(ids.includes(win.tabId) && ids.includes(7001) && !ids.includes(8001));
 
+// 6. 录制窗口（kind: record）里用户自己开的新 tab（没有 opener）也纳入；run 窗口不放宽
+await host({ id: 20, op: "tab", name: "openWindow", args: { focused: false, kind: "record" } });
+await settle();
+const rec = last().result;
+const createdCount = () => posted.filter((m) => m.type === "tab" && m.kind === "created").length;
+const before = createdCount();
+tabs.set(9001, { id: 9001, windowId: rec.windowId, url: "chrome://newtab" });
+await listeners.tabCreated({ id: 9001, windowId: rec.windowId, openerTabId: undefined });
+await settle();
+assert.equal(createdCount(), before + 1, "录制窗口里没有 opener 的 tab 应被纳入并通知 holder");
+assert.equal(posted.filter((m) => m.type === "tab" && m.kind === "created").at(-1).tabId, 9001);
+tabs.set(9002, { id: 9002, windowId: win.windowId, url: "https://user.com" });
+await listeners.tabCreated({ id: 9002, windowId: win.windowId, openerTabId: undefined });
+await settle();
+assert.equal(createdCount(), before + 1, "run 窗口里没有 opener 的 tab 不纳入");
+// 录制窗口关闭后不再放宽
+await host({ id: 21, op: "tab", name: "closeWindow", args: { windowId: rec.windowId } });
+await settle();
+tabs.set(9003, { id: 9003, windowId: rec.windowId, url: "https://late.com" });
+await listeners.tabCreated({ id: 9003, windowId: rec.windowId, openerTabId: undefined });
+await settle();
+assert.equal(createdCount(), before + 1, "窗口关闭后不再纳入"); 
+
 // 6. 调试器事件带 tabId 转发；分离通知
 listeners.debuggerEvent({ tabId: win.tabId }, "Page.loadEventFired", { timestamp: 1 });
 const ev = posted.find((m) => m.type === "event");

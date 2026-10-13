@@ -37,13 +37,22 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 - 同一时间只能运行一个 task。另一个 task 正在运行时，会自动等待最多 30 秒再开始；仍被占用则失败，稍后重试同一条命令。不要并行发起多个 `yodo run` 或 `yodo eval`，按顺序一个接一个运行。录制进行中不能运行 task，需先 `yodo record stop` 或 `yodo record abort`。
 - 超时分两层：单个步骤（`evaluate`、`goto`、`waitForSelector`、`expectRequest`）默认最长 30 秒；整个 task 默认最长 90 秒。超时会被终止并按失败返回，错误里会说明是哪一层。`yodo eval` 对每个内层 task 单独计时。
 - `yodo eval` 中某个内层 task 失败时，还会带 `failedTask`，值为该 task 名。
+- task 里 `console.log` 等输出会出现在 stderr，不影响 stdout 的 JSON 和退出码。不要大量打印，stderr 的内容也会进入你的上下文。
 - 输出 `need-install`、`need-chrome` 或 `need-extension` 时，把 `guide` 原样告诉用户，等待用户回复「好了」，然后重新运行同一条命令。不要改写 `guide`，不要轮询。
 - `result` 只包含用户要求的内容。原始接口响应、整段 HTML、完整列表只能在 task 内部用于取值。
 
 ## 4. 录制与学习
 
-- 录制窗口的标题是 `yodo record`。请用户只在这个窗口里演示。
-- `timeline.jsonl` 按时间排序，包含 request 行（有 `file` 指向请求文件）和 action 行（`click`、`value`、`checked`、`scroll`、`navigation`，附带 `role` 与 `name`）。
+- 录制窗口的标题是 `yodo record`。请用户只在这个窗口里演示；用户在这个窗口里自己新开的标签页也会被记录。录制期间遇到的网页对话框（确认框等）由用户自己选择，不会被自动确认。
+- `timeline.jsonl` 按时间排序，包含 request 行（有 `file` 指向请求文件）和 action 行。action 行的 `actionType` 和字段：
+  - `click`：`selector`、`role`、`name`。
+  - `value`：输入后的 `value`（密码等敏感字段只有 `valueRedacted: true`）；下拉框另有 `option`（选中项的文字）。
+  - `checked`：勾选后的 `checked`。
+  - `scroll`：`deltaY`（向下为正）、`deltaX`，滚到底时有 `nearEnd: true`；容器内滚动带 `selector`，整页滚动没有。
+  - `navigation`：`url`，包含页面内路由变化；iframe 里的导航不记录。
+  - 公共字段：`selector` 是页面里尽量稳定且唯一的 CSS 选择器（shadow DOM 里的元素用它所在宿主的选择器）；有多个标签页时带 `tab`（第几个），在 iframe 里的操作带 `frame`（iframe 的地址）。
+  - `selector` 用于写 `click`、`fill` 等，但页面改版后可能失效，写 task 后要运行验证。键盘按键不记录，用回车提交的搜索只能从后面的请求和导航推断。
+- `record stop` 的输出里有 `warnings` 时，说明某些页面的点击、输入、滚动没有录到（只有网络请求）。把 `warnings` 的内容告诉用户，请用户重新演示这一步，不要根据缺失的动作推断。
 - 响应体存为 `recordDir` 下的文件。需要看响应时直接读取文件。
 
 ## 5. 写 task
@@ -68,15 +77,15 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 SDK：
 
 ```javascript
-import { yodo, goto, click, fill, press, toggle, expectRequest, serializeUrl } from "../task/lib/index.js";
+import { yodo, goto, evaluate, click, fill, press, toggle, expectRequest, serializeUrl } from "../task/lib/index.js";
 
 await yodo.run(async ({ page }) => {
   await goto(page, serializeUrl({ bareUrl: "https://example.com/search", query: { q: process.argv[2] } }));
-  return page.evaluate(() => document.title);
+  return evaluate(page, () => document.title);
 });
 ```
 
-- `page.evaluate(fn, ...args)`：在页面内执行函数，参数必须可 JSON 序列化。
+- `evaluate(page, fn, ...args)`：在页面内执行函数，参数必须可 JSON 序列化。注意 `page` 对象本身没有 `evaluate` 方法，必须用这个函数。
 - `page.cdp.send(method, params)`：页面级 CDP 命令。
 - `page.cdp.on(event, listener)`：监听页面事件。
 - `goto`、`click`、`fill`、`press`、`scroll`、`check`、`select`、`waitForSelector`：页面操作。

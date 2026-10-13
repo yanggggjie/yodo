@@ -5,7 +5,7 @@ import { assertNode24 } from "./utils/node.ts";
 import { sleep } from "./utils/async.ts";
 import { RUN_BUSY_WAIT_MS } from "./utils/constants.ts";
 import { RPC_ERRORS, formatHandshakeStdout, isHandshakeStatus } from "./protocol.ts";
-import { captureConsole, runFailureJson, runSuccessJson } from "./run-report.ts";
+import { consoleToStderr, runFailureJson, runSuccessJson } from "./run-report.ts";
 
 type Listener<E extends keyof ProtocolMapping.Events> = (...params: ProtocolMapping.Events[E]) => void;
 
@@ -39,7 +39,7 @@ function cdpSession(peer: RpcPeer, pageId: string): CdpSession {
   };
 }
 
-export type PageHandle = { readonly _targetId: string; readonly cdp: CdpSession };
+export type PageHandle = { readonly cdp: CdpSession };
 export type TaskFn = (api: { page: PageHandle }) => Promise<unknown> | unknown;
 
 
@@ -72,8 +72,8 @@ export const yodo = {
       if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(status && isHandshakeStatus(status) ? formatHandshakeStdout(status) : runFailureJson(new Error(blocked.message), scriptAbs)); process.exitCode = 1; return; }
       peer = await RpcPeer.open();
       const begun = await beginRun(peer);
-      const page: PageHandle = { _targetId: begun.pageId, cdp: cdpSession(peer, begun.pageId) };
-      const logs: string[] = []; restore = captureConsole(logs);
+      const page: PageHandle = { cdp: cdpSession(peer, begun.pageId) };
+      restore = consoleToStderr();
       const result = await fn({ page });
       restore(); restore = undefined;
       console.log(runSuccessJson(result));

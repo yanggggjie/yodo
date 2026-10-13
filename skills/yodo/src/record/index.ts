@@ -21,7 +21,7 @@ import {
   formatStopStdout,
   writeArtifacts,
 } from "./write.ts";
-import { DomRecordStore } from "./dom.ts";
+import { DomRecordStore, pagesMissingScript } from "./dom.ts";
 
 const logger = createLogger("record");
 
@@ -97,7 +97,6 @@ export async function startRecord(
       raw,
       active,
       tracker,
-      networkRecorder.sessionToTarget,
       domStore,
     );
 
@@ -140,6 +139,7 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
   }
 
   if (reason === "abort") {
+    fs.rmSync(current.recordDir, { recursive: true, force: true });
     current.events.length = 0;
     domStore = null;
     logger.info(`aborted ${current.name}`);
@@ -151,6 +151,10 @@ async function doFinish(reason: "stop" | "abort" | "disconnect"): Promise<string
     logger.info(`pipeline ${current.events.length} → ${processed.length}`);
     const domEvents = domStore?.events ?? [];
     const flushResult = await writeArtifacts(current.recordDir, processed, domEvents, current.name);
+    const missing = domStore ? pagesMissingScript(current.events, domStore.ready) : [];
+    if (missing.length) {
+      flushResult.warnings = missing.map((origin) => `${origin} 的页面脚本没有生效，这个页面的点击、输入、滚动没有录到；请重新录制这一步`);
+    }
     const finalDir = path.join(RECORD_DIR, current.name);
     if (fs.existsSync(finalDir)) throw new Error(`record 已存在：${current.name}`);
     fs.renameSync(current.recordDir, finalDir);

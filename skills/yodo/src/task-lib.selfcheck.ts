@@ -6,7 +6,7 @@ import type { PageHandle } from "./sdk.ts";
 const calls: string[] = [];
 const expressions: string[] = [];
 const listeners = new Map<string, (value: unknown) => void>();
-const page = { _targetId: "P1", cdp: {
+const page = { cdp: {
   async send(method: string, params?: { expression?: string }) {
     calls.push(method);
     if (method === "Runtime.evaluate") {
@@ -44,7 +44,7 @@ assert.match(expressions[3], /scrollBy/);
 
 // waitForSelector 在 Node 侧轮询：每次只做一次快速 evaluate，出现后立即返回
 let polls = 0;
-const waiting = { _targetId: "P2", cdp: {
+const waiting = { cdp: {
   async send(method: string) {
     if (method === "Runtime.evaluate") { polls++; return { result: { value: polls >= 3 } }; }
     return {};
