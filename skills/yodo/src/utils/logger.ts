@@ -12,15 +12,11 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = {
 };
 
 let globalLogFile: string | undefined;
-let minLevel: LogLevel = (process.env.YODO_LOG_LEVEL as LogLevel) || "INFO";
+const minLevel: LogLevel = (process.env.YODO_LOG_LEVEL as LogLevel) || "INFO";
 
 export function setLogFile(filePath: string | undefined): void {
   globalLogFile = filePath;
   if (filePath) fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-export function setMinLogLevel(level: LogLevel): void {
-  minLevel = level;
 }
 
 /** 丢掉最旧的，保住最近约 maxBytes（下一行 JSON 边界）。不要 truncate(0)。 */

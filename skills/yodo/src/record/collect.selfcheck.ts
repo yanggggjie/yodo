@@ -11,7 +11,6 @@ import {
 } from "./collect.ts";
 import { DomRecordStore } from "./dom.ts";
 import type { RawCdpConnection, TabOps } from "../browser/index.ts";
-import { isRawRequest } from "./types.ts";
 
 assert.ok(isRecordableUrl("https://example.com/a"));
 assert.ok(!isRecordableUrl("chrome://version"));
@@ -48,7 +47,7 @@ function fakeExtension(tabsOwned: { tabId: number; windowId: number; url: string
       calls.push({ method: "closeTab", params: { tabId } });
     },
     closeWindow: async () => {},
-    listOwned: async () => ({ tabs: [...tabs] }),
+    listOwned: async () => ({ tabs: tabs.map((t) => ({ ...t, title: "" })) }),
     windowOf: async (tabId) => {
       const t = tabs.find((x) => x.tabId === tabId);
       if (!t) throw new Error("gone");

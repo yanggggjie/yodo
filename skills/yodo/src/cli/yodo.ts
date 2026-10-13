@@ -12,7 +12,7 @@ import { handleDoctor } from "./doctor.ts";
 import { runEval } from "./compose.ts";
 import { invokeTaskFile, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 import { writeRunHistory } from "../run-history.ts";
-import { formatErrorStdout } from "../protocol.ts";
+import { formatErrorStdout, formatHandshakeStdout, isHandshakeStatus } from "../protocol.ts";
 import { assertNode24 } from "../utils/node.ts";
 import { TASK_DIR, CLI_RPC_BUFFER_MS, RECORD_STOP_RPC_MS } from "../utils/constants.ts";
 
@@ -67,7 +67,8 @@ async function recordCall(method: "record.start" | "record.stop" | "record.abort
   try { print(await ensureSessionAndRpc(method, params, timeout)); }
   catch (error) {
     const value = error as { data?: { status?: string }; message?: string };
-    if (value.data?.status) { print({ status: value.data.status, guide: value.message ?? "" }); process.exitCode = 1; }
+    const status = value.data?.status;
+    if (status && isHandshakeStatus(status)) { console.log(formatHandshakeStdout(status)); process.exitCode = 1; }
     else fail(value.message ?? String(error));
   }
 }

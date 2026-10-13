@@ -11,17 +11,35 @@ let port = null;
 let retryCount = 0;
 let retryTimer = null;
 
-// 由 yodo 拥有的窗口与 tab。写入 chrome.storage.session，service worker 重启后仍在。
+// 由 yodo 拥有的窗口与 tab。
+// storage.session：同一浏览器会话内 service worker 重启后 id 可信，但扩展刷新会清空它。
+// storage.local：扩展刷新后仍在，但 id 在浏览器重启后会被复用，所以只在窗口里仍有标题为 yodo 的 tab 时才信任。
+const YODO_TITLES = new Set(["yodo run", "yodo record"]);
 const owned = { windows: new Set(), tabs: new Set() };
 const attached = new Set();
 
-const ready = chrome.storage.session.get(["windows", "tabs"]).then((saved) => {
+const ready = restoreOwned();
+
+async function restoreOwned() {
+  const saved = await chrome.storage.session.get(["windows", "tabs"]);
   for (const id of saved.windows ?? []) owned.windows.add(id);
   for (const id of saved.tabs ?? []) owned.tabs.add(id);
-});
+
+  const persisted = await chrome.storage.local.get(["windows", "tabs"]);
+  const persistedTabs = new Set(persisted.tabs ?? []);
+  for (const windowId of persisted.windows ?? []) {
+    if (owned.windows.has(windowId)) continue;
+    const win = await chrome.windows.get(windowId, { populate: true }).catch(() => null);
+    if (!win?.tabs?.some((tab) => YODO_TITLES.has(tab.title))) continue;
+    owned.windows.add(windowId);
+    for (const tab of win.tabs) if (persistedTabs.has(tab.id)) owned.tabs.add(tab.id);
+  }
+  await saveOwned();
+}
 
 async function saveOwned() {
-  await chrome.storage.session.set({ windows: [...owned.windows], tabs: [...owned.tabs] });
+  const value = { windows: [...owned.windows], tabs: [...owned.tabs] };
+  await Promise.all([chrome.storage.session.set(value), chrome.storage.local.set(value)]);
 }
 
 function postToHost(message) {
@@ -125,7 +143,7 @@ async function runTab(name, args) {
           owned.tabs.delete(tabId);
           continue;
         }
-        tabs.push({ tabId, windowId: tab.windowId, url: tab.url || tab.pendingUrl || "" });
+        tabs.push({ tabId, windowId: tab.windowId, url: tab.url || tab.pendingUrl || "", title: tab.title || "" });
       }
       await saveOwned();
       return { tabs };

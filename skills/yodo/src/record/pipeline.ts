@@ -7,7 +7,6 @@ import type {
   RequestKind,
 } from "./types.ts";
 
-export type AdblockEngine = FiltersEngine;
 
 let engine: FiltersEngine | undefined;
 let enginePromise: Promise<FiltersEngine> | undefined;

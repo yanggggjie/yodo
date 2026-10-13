@@ -4,34 +4,30 @@ import {
   CdpPage,
   RECORD_WINDOW_TITLE,
   RUN_WINDOW_TITLE,
-  envelopeCdpCommand,
   isChromeUiUrl,
   type RawCdpConnection,
 } from "./session.ts";
 import type { TabOps } from "./extension.ts";
 
-const flat = envelopeCdpCommand(1, "Network.enable", { a: 1 }, "101");
-assert.equal(flat.sessionId, "101");
-assert.equal(envelopeCdpCommand(2, "Page.enable").sessionId, undefined);
 assert.equal(isChromeUiUrl("chrome://new-tab-page"), true);
 assert.equal(isChromeUiUrl("https://a.com"), false);
 
 /** 内存版扩展：记录每次 tab / window 操作，tab 归 yodo 所有。 */
 function fakeTabs() {
-  const tabs = new Map<number, { windowId: number; url: string }>();
+  const tabs = new Map<number, { windowId: number; url: string; title: string }>();
   const calls: string[] = [];
   let next = 100;
   const ops: TabOps = {
     openWindow: async ({ focused }) => {
       const windowId = next++;
       const tabId = next++;
-      tabs.set(tabId, { windowId, url: "about:blank" });
+      tabs.set(tabId, { windowId, url: "about:blank", title: "" });
       calls.push(`openWindow:focused=${focused}`);
       return { windowId, tabId };
     },
     openTab: async ({ windowId, url }) => {
       const tabId = next++;
-      tabs.set(tabId, { windowId, url });
+      tabs.set(tabId, { windowId, url, title: "" });
       calls.push("openTab");
       return { tabId };
     },
@@ -44,7 +40,7 @@ function fakeTabs() {
       calls.push(`closeWindow:${windowId}`);
     },
     listOwned: async () => ({
-      tabs: [...tabs].map(([tabId, v]) => ({ tabId, windowId: v.windowId, url: v.url })),
+      tabs: [...tabs].map(([tabId, v]) => ({ tabId, windowId: v.windowId, url: v.url, title: v.title })),
     }),
     windowOf: async (tabId) => {
       const v = tabs.get(tabId);
@@ -63,7 +59,7 @@ function fakeTabs() {
 
 type Sent = { method: string; params?: Record<string, unknown>; sessionId?: string };
 
-function fakeRaw(ops: TabOps, sent: Sent[]) {
+function fakeRaw(ops: TabOps, sent: Sent[], tabs?: Map<number, { title: string }>) {
   const handlers = new Map<string, Set<(params: unknown, sessionId?: string) => void>>();
   const emit = (method: string, params: unknown, sessionId?: string) => {
     for (const h of handlers.get(method) ?? []) h(params, sessionId);
@@ -75,7 +71,12 @@ function fakeRaw(ops: TabOps, sent: Sent[]) {
     send: async (method, params = {}, sessionId) => {
       if (!sessionId) throw new Error(`browser 级 CDP 不可用：${method}`);
       sent.push({ method, params, sessionId });
-      if (method === "Runtime.evaluate") return { result: { type: "string", value: "ok" } };
+      if (method === "Runtime.evaluate") {
+        const title = /document\.title = ("(?:[^"\\]|\\.)*")/.exec(String(params.expression ?? ""));
+        const tab = tabs?.get(Number(sessionId));
+        if (title && tab) tab.title = JSON.parse(title[1]!) as string;
+        return { result: { type: "string", value: "ok" } };
+      }
       if (method === "Page.navigate") {
         queueMicrotask(() => emit("Page.loadEventFired", {}, sessionId));
         return { frameId: "f1" };
@@ -100,7 +101,7 @@ function fakeRaw(ops: TabOps, sent: Sent[]) {
   const { ops, calls } = fakeTabs();
   const sent: Sent[] = [];
   const { raw } = fakeRaw(ops, sent);
-  const page = new CdpPage(raw, "100", "100", "https://example.com");
+  const page = new CdpPage(raw, "100", "100");
   assert.equal(page.targetId, "100");
   await page.close();
   assert.equal(page.isClosed(), true);
@@ -154,6 +155,63 @@ function fakeRaw(ops: TabOps, sent: Sent[]) {
   emit("tab.removed", { tabId: Number(page.targetId) });
   assert.equal(page.isClosed(), true);
   assert.equal(ctx.pages().length, 1, "只剩锚点");
+}
+
+// 6. 对账：扩展刷新或 holder 重启后，run 窗数量不增加
+{
+  // a) 扩展刷新，holder 还记得 run 窗：保留窗口，关掉残留 tab 和孤儿 run 窗，丢弃附加状态未知的页面记录
+  const { ops, tabs, calls } = fakeTabs();
+  const { raw } = fakeRaw(ops, [], tabs);
+  const ctx = new CdpContext(raw);
+  const interrupted = await ctx.newPage(); // run 被打断，tab 没来得及关
+  const strayWindow = 900;
+  tabs.set(901, { windowId: strayWindow, url: "about:blank", title: RUN_WINDOW_TITLE }); // 更早的 holder 留下的孤儿
+  tabs.set(902, { windowId: 800, url: "https://popup.example", title: "popup" }); // yodo 的 tab 打开的普通弹窗，没有 yodo 标题
+  await ctx.reconcile({ recordLive: false, runActive: false });
+  assert.ok(calls.includes(`closeTab:${interrupted.targetId}`), "残留的 run tab 被关掉");
+  assert.ok(calls.includes(`closeWindow:${strayWindow}`), "孤儿 run 窗被关闭");
+  assert.ok(!calls.includes("closeWindow:800"), "没有 yodo 标题的窗口绝不会被关闭");
+  assert.equal(ctx.pages().length, 0, "页面记录已丢弃");
+  const next = await ctx.newPage();
+  assert.ok(next.targetId);
+  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 1, "沿用原 run 窗，没有新开");
+}
+
+{
+  // b) holder 重启：新的 context 什么都不记得，收养已有的 run 窗并关掉多余的
+  const { ops, tabs, calls } = fakeTabs();
+  const { raw } = fakeRaw(ops, [], tabs);
+  tabs.set(300, { windowId: 30, url: "about:blank", title: RUN_WINDOW_TITLE });
+  tabs.set(301, { windowId: 31, url: "about:blank", title: RUN_WINDOW_TITLE });
+  const ctx = new CdpContext(raw);
+  await ctx.reconcile({ recordLive: false, runActive: false });
+  assert.ok(calls.includes("closeWindow:31"), "多出来的 run 窗被关闭");
+  assert.ok(!calls.includes("closeWindow:30"), "最早的 run 窗被收养");
+  await ctx.newPage();
+  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 0, "沿用被收养的 run 窗，没有新开窗口");
+}
+
+{
+  // c) 录制窗：录制进行中不碰，没有录制时才是孤儿
+  const { ops, tabs, calls } = fakeTabs();
+  const { raw } = fakeRaw(ops, [], tabs);
+  tabs.set(500, { windowId: 50, url: "about:blank", title: RECORD_WINDOW_TITLE });
+  const ctx = new CdpContext(raw);
+  await ctx.reconcile({ recordLive: true, runActive: false });
+  assert.ok(!calls.includes("closeWindow:50"), "录制进行中不关录制窗");
+  await ctx.reconcile({ recordLive: false, runActive: false });
+  assert.ok(calls.includes("closeWindow:50"), "没有录制时录制窗是孤儿");
+}
+
+{
+  // d) 有 run 正在进行：不关它的 tab，也不丢它的页面记录
+  const { ops, calls } = fakeTabs();
+  const { raw } = fakeRaw(ops, []);
+  const ctx = new CdpContext(raw);
+  const running = await ctx.newPage();
+  await ctx.reconcile({ recordLive: false, runActive: true });
+  assert.ok(!calls.includes(`closeTab:${running.targetId}`), "进行中的 run 的 tab 不被关闭");
+  assert.equal(ctx.pages().some((p) => p.targetId === running.targetId), true, "进行中的 run 的页面记录保留");
 }
 
 console.log("browser session selfcheck ok");

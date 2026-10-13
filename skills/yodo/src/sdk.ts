@@ -4,7 +4,7 @@ import { RpcError, RpcPeer } from "./cli/rpc.ts";
 import { assertNode24 } from "./utils/node.ts";
 import { sleep } from "./utils/async.ts";
 import { RUN_BUSY_WAIT_MS } from "./utils/constants.ts";
-import { RPC_ERRORS } from "./protocol.ts";
+import { RPC_ERRORS, formatHandshakeStdout, isHandshakeStatus } from "./protocol.ts";
 import { captureConsole, runFailureJson, runSuccessJson } from "./run-report.ts";
 
 type Listener<E extends keyof ProtocolMapping.Events> = (...params: ProtocolMapping.Events[E]) => void;
@@ -69,7 +69,7 @@ export const yodo = {
     try {
       assertNode24();
       const blocked = await ensureHolder();
-      if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(JSON.stringify({ status, guide: blocked.message }, null, 2)); process.exitCode = 1; return; }
+      if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(status && isHandshakeStatus(status) ? formatHandshakeStdout(status) : runFailureJson(new Error(blocked.message), scriptAbs)); process.exitCode = 1; return; }
       peer = await RpcPeer.open();
       const begun = await beginRun(peer);
       const page: PageHandle = { _targetId: begun.pageId, cdp: cdpSession(peer, begun.pageId) };
@@ -80,7 +80,7 @@ export const yodo = {
     } catch (error) {
       restore?.(); restore = undefined;
       const status = error instanceof RpcError ? (error.data as { status?: string } | undefined)?.status : undefined;
-      if (status) { console.log(JSON.stringify({ status, guide: error instanceof Error ? error.message : String(error) }, null, 2)); process.exitCode = 1; }
+      if (status && isHandshakeStatus(status)) { console.log(formatHandshakeStdout(status)); process.exitCode = 1; }
       else { console.log(runFailureJson(error, scriptAbs)); process.exitCode = 1; }
     } finally {
       restore?.();

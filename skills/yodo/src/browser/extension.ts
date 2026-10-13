@@ -1,5 +1,5 @@
 /**
- * 扩展通道：holder 作为 native messaging host，与 yodo Chrome 扩展说话。
+ * 扩展通道：holder 经 relay（Chrome 拉起的 native messaging host，只转发字节）与 yodo Chrome 扩展说话。
  * 帧：4 字节小端长度前缀 + UTF-8 JSON。
  *
  * holder → 扩展：{ id, op: "cdp", tabId, method, params } | { id, op: "tab", name, args }
@@ -18,7 +18,7 @@ export type TabOps = {
   openTab(opts: { windowId: number; url: string; active: boolean }): Promise<{ tabId: number }>;
   closeTab(tabId: number): Promise<void>;
   closeWindow(windowId: number): Promise<void>;
-  listOwned(): Promise<{ tabs: { tabId: number; windowId: number; url: string }[] }>;
+  listOwned(): Promise<{ tabs: { tabId: number; windowId: number; url: string; title: string }[] }>;
   windowOf(tabId: number): Promise<{ windowId: number; state: string }>;
   attach(tabId: number): Promise<void>;
   detach(tabId: number): Promise<void>;
@@ -41,7 +41,6 @@ export class ExtensionLink {
   private anyListeners = new Set<(method: string, params: unknown, sessionId?: string) => void>();
   private closeHandlers = new Set<() => void>();
   private commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
-  private rpc: { id: string; op: string } | undefined;
 
   constructor() {
     const self = this;
@@ -73,7 +72,7 @@ export class ExtensionLink {
       openTab: (args) => call({ op: "tab", name: "openTab", args }) as Promise<{ tabId: number }>,
       closeTab: (tabId) => call({ op: "tab", name: "closeTab", args: { tabId } }).then(() => undefined),
       closeWindow: (windowId) => call({ op: "tab", name: "closeWindow", args: { windowId } }).then(() => undefined),
-      listOwned: () => call({ op: "tab", name: "listOwned", args: {} }) as Promise<{ tabs: { tabId: number; windowId: number; url: string }[] }>,
+      listOwned: () => call({ op: "tab", name: "listOwned", args: {} }) as Promise<{ tabs: { tabId: number; windowId: number; url: string; title: string }[] }>,
       windowOf: (tabId) => call({ op: "tab", name: "windowOf", args: { tabId } }) as Promise<{ windowId: number; state: string }>,
       attach: (tabId) => call({ op: "tab", name: "attach", args: { tabId } }).then(() => undefined),
       detach: (tabId) => call({ op: "tab", name: "detach", args: { tabId } }).then(() => undefined),
@@ -98,8 +97,6 @@ export class ExtensionLink {
     this.raw = {
       get commandTimeoutMs() { return self.commandTimeoutMs; },
       set commandTimeoutMs(v: number) { self.commandTimeoutMs = v; },
-      get rpc() { return self.rpc; },
-      set rpc(v: { id: string; op: string } | undefined) { self.rpc = v; },
       get chromeVersion() { return self.chromeVersion; },
       ops: this.ops,
       send,

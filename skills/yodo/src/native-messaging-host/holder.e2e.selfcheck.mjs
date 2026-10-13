@@ -109,6 +109,7 @@ await waitFor(() => fs.existsSync(SOCK));
 await waitFor(async () => (await rpc("ping")).chrome === "Chrome/e2e");
 const ping = await rpc("ping");
 assert.equal(ping.chrome, "Chrome/e2e", "hello 里的 chromeVersion 应回传到 ping");
+assert.equal(ping.extension, true, "扩展链路接着时 ping.extension 为 true");
 console.log("ping ok:", ping.chrome);
 
 // 第二个 daemon：扩展通道 socket 活着，应当直接退出，不覆盖
@@ -154,6 +155,8 @@ child.stdin.end(); // Chrome 退出 = relay stdin 关闭
 await new Promise((r) => child.on("exit", r));
 await new Promise((r) => setTimeout(r, 300));
 assert.equal(fs.existsSync(SOCK), true, "relay 退出后 daemon 应仍在运行");
+assert.equal((await rpc("ping")).extension, false, "relay 断开后 daemon 还在，但 ping.extension 为 false");
+closeRpc();
 console.log("relay exit keeps daemon ok; cdp methods seen:", ext.cdpLog.length);
 
 // 扩展重连：新 relay 接入同一个 daemon，pid 不变，状态仍在
@@ -162,6 +165,7 @@ fakeExtension(relay2);
 relay2.stdin.write(frame({ type: "hello", protocolVersion: 1, chromeVersion: "Chrome/e2e2" }));
 await waitFor(async () => (await rpc("ping")).chrome === "Chrome/e2e2");
 assert.equal((await rpc("ping")).pid, daemonPid, "重连后 daemon pid 不变");
+assert.equal((await rpc("ping")).extension, true, "重连后 ping.extension 恢复为 true");
 console.log("reconnect keeps daemon ok");
 relay2.stdin.end();
 await new Promise((r) => relay2.on("exit", r));

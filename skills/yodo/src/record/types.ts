@@ -105,7 +105,3 @@ export type RawRequest = {
 };
 
 export type RawEvent = RawRequest;
-
-export function isRawRequest(entry: RawEvent): entry is RawRequest {
-  return "requestType" in entry;
-}

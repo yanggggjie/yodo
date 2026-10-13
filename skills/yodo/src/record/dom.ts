@@ -1,5 +1,3 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { DomTimelineItem, TimelineDomEventItem } from "./types.ts";
 
 export class DomRecordStore {

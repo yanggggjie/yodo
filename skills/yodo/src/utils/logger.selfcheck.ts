@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { handshakeStatusFromMark } from "../protocol.ts";
 import { createLogger, dropOldestKeepNewest, setLogFile } from "./logger.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-log-"));
@@ -17,7 +16,6 @@ assert.equal(rec.level, "WARN");
 assert.equal(rec.scope, "test");
 assert.equal(rec.msg, "yodo:need-chrome");
 assert.match(rec.ts, /^\d{4}-\d{2}-\d{2}T/);
-assert.equal(handshakeStatusFromMark(raw), "need-chrome");
 
 const small = path.join(dir, "trim.jsonl");
 const lines: string[] = [];

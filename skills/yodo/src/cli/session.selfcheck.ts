@@ -32,6 +32,8 @@ try {
   // holder 在：pid 文件 + 能应答 ping
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   fs.writeFileSync(SESSION_PID_FILE, String(process.pid));
+  // 假 holder 的 ping 应答里的 extension 可调
+  let extension = true;
   const server = net.createServer((socket) => {
     let buf = "";
     socket.on("data", (chunk) => {
@@ -39,13 +41,29 @@ try {
       const nl = buf.indexOf("\n");
       if (nl < 0) return;
       const req = JSON.parse(buf.slice(0, nl)) as { id: string };
-      socket.end(`${JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { pid: process.pid, chrome: "x", pages: 0, record: null } })}\n`);
+      socket.end(`${JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { pid: process.pid, chrome: "x", extension, pages: 0, record: null } })}\n`);
     });
   });
   await new Promise<void>((resolve, reject) => { server.listen(SESSION_SOCK, () => resolve()); server.on("error", reject); });
   try {
     assert.equal((await tryPing())?.pid, process.pid);
     assert.equal(await ensureHolder({ missingStatus: () => "need-install" }), null, "holder 在时不应判断缺什么");
+
+    // holder 在，但 relay 已断开（extension: false）
+    extension = false;
+    //   Chrome 已退出：判成 need-chrome，立即返回，而不是 need-extension
+    let started2 = Date.now();
+    const chromeGone = await ensureHolder({ missingStatus: () => "need-chrome", readyMs: 5_000 });
+    assert.equal((chromeGone?.data as { status: string }).status, "need-chrome");
+    assert.ok(Date.now() - started2 < 1_000, "Chrome 已退出时不用等");
+    //   Chrome 在运行：等扩展重连，超时后才是 need-extension
+    started2 = Date.now();
+    const waitingExt = await ensureHolder({ missingStatus: () => "need-extension", readyMs: 600 });
+    assert.equal((waitingExt?.data as { status: string }).status, "need-extension");
+    assert.ok(Date.now() - started2 >= 500, "应等待扩展重连");
+    //   等待期间扩展连上：返回可用
+    setTimeout(() => { extension = true; }, 300);
+    assert.equal(await ensureHolder({ missingStatus: () => "need-extension", readyMs: 3_000 }), null, "扩展重连后可用");
   } finally {
     server.close();
   }

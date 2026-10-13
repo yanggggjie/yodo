@@ -19,7 +19,7 @@ const server = net.createServer((socket) => {
     while ((nl = buffer.indexOf("\n")) >= 0) {
       const request = JSON.parse(buffer.slice(0, nl)); buffer = buffer.slice(nl + 1); seen.push(request.method);
       let result: unknown = {};
-      if (request.method === "ping") result = { pid: process.pid, chrome: "mock", pages: 1, record: null };
+      if (request.method === "ping") result = { pid: process.pid, chrome: "mock", extension: true, pages: 1, record: null };
       if (request.method === "run.begin") result = { pageId: "P1" };
       if (request.method === "cdp.send") {
         socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { result: { value: "ok" } } })}\n`);

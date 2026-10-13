@@ -14,10 +14,13 @@ let nextTab = 2000;
 const tabs = new Map();
 
 globalThis.chrome = {
-  storage: { session: {
-    get: async (keys) => Object.fromEntries(keys.map((k) => [k, storage[k]])),
-    set: async (obj) => Object.assign(storage, obj),
-  } },
+  storage: {
+    session: {
+      get: async (keys) => Object.fromEntries(keys.map((k) => [k, storage[k]])),
+      set: async (obj) => Object.assign(storage, obj),
+    },
+    local: { get: async () => ({}), set: async () => {} },
+  },
   runtime: {
     connectNative: (name) => {
       calls.push(["connectNative", name]);
@@ -115,6 +118,7 @@ assert.equal(posted.filter((m) => m.type === "tab" && m.kind === "created").leng
 await host({ id: 9, op: "tab", name: "listOwned", args: {} });
 await settle();
 const ids = last().result.tabs.map((t) => t.tabId);
+assert.equal(typeof last().result.tabs[0].title, "string", "listOwned 带 title，holder 靠它识别 yodo 的窗口");
 assert.ok(ids.includes(win.tabId) && ids.includes(7001) && !ids.includes(8001));
 
 // 6. 调试器事件带 tabId 转发；分离通知

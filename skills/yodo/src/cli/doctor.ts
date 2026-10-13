@@ -77,11 +77,12 @@ async function collectChecks(): Promise<Check[]> {
   // pid 存活不代表 holder 可用：再 ping 一次，卡死的 holder 也会被发现。
   const pid = readSessionPid();
   const alive = pid !== null && isPidAlive(pid);
-  const responding = alive ? (await tryPing()) !== null : false;
+  const ping = alive ? await tryPing() : null;
+  const responding = ping?.extension === true;
   add({
     name: "holder",
     ok: responding,
-    detail: pid ? (responding ? `alive pid=${pid}` : alive ? `pid=${pid} 无响应` : `stale pid=${pid}`) : "无",
+    detail: pid ? (responding ? `alive pid=${pid}` : ping ? `pid=${pid} 在运行，扩展未连接` : alive ? `pid=${pid} 无响应` : `stale pid=${pid}`) : "无",
     fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标；仍无响应则在 chrome://extensions 刷新扩展",
     optional: true,
   });

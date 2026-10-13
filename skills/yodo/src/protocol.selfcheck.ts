@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
 import {
   HANDSHAKE_GUIDES,
-  HANDSHAKE_MARKS,
   formatErrorStdout,
   formatHandshakeStdout,
   handshakeStatusFromError,
-  handshakeStatusFromMark,
 } from "./protocol.ts";
 
-assert.equal(handshakeStatusFromMark("yodo:need-install"), "need-install");
-assert.equal(handshakeStatusFromMark(`boom\n${HANDSHAKE_MARKS["need-extension"]}\n`), "need-extension");
-assert.equal(handshakeStatusFromMark("Error: 扩展通道已关闭"), null);
 
 class NeedInstallError extends Error {
   constructor() {

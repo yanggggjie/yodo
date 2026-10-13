@@ -3,7 +3,7 @@ import * as net from "node:net";
 import { connectChrome, disconnectChrome, ExtensionLink, frame, parseFrames, setActiveLink, type CdpBrowser, type CdpContext, type CdpPage } from "./browser/index.ts";
 import { finishRecord, liveRecordName, startRecord } from "./record/index.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
-import { HANDSHAKE_GUIDES, HANDSHAKE_MARKS, RPC_ERRORS, handshakeStatusFromError, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
+import { HANDSHAKE_GUIDES, RPC_ERRORS, handshakeStatusFromError, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
 import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_EXT_SOCK, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
 import { createLogger, setLogFile } from "./utils/logger.ts";
 
@@ -15,6 +15,8 @@ let browser: CdpBrowser | undefined;
 let context: CdpContext | undefined;
 let chromeVersion = "";
 let chromeReady: Promise<void> | null = null;
+/** 扩展每次 hello 之后的对账；除 ping 外的请求都要等它完成。 */
+let reconciled: Promise<void> = Promise.resolve();
 let recordBusy = false;
 let shuttingDown = false;
 let server: net.Server | null = null;
@@ -36,7 +38,8 @@ type ConnState = { runActive: boolean; write: (message: JsonRpcResponse | JsonRp
 let activeRunConn: ConnState | null = null;
 
 function pagesOf(ctx: CdpContext): number { return ctx.pages().filter((page) => !page.isClosed()).length; }
-function pingBody() { return { pid: process.pid, chrome: chromeVersion, pages: context ? pagesOf(context) : 0, record: liveRecordName() }; }
+/** `extension`：扩展链路当前是否接着。holder 在 relay 断开后还会存活一段时间，ping 通不代表扩展在线。 */
+function pingBody() { return { pid: process.pid, chrome: chromeVersion, extension: extSocket !== null, pages: context ? pagesOf(context) : 0, record: liveRecordName() }; }
 function warnCatch(label: string): (error: unknown) => void { return (error) => logger.warn(label, { err: error instanceof Error ? error.message : String(error) }); }
 async function tryConnectChrome(): Promise<void> { const connected = await connectChrome(); browser = connected.browser; context = connected.context; chromeVersion = await browser.version().catch(() => "Google Chrome (CDP)"); browser.on("disconnected", () => void shutdown(1)); }
 async function ensureChrome(): Promise<void> {
@@ -67,43 +70,41 @@ function paramsOf(req: JsonRpcRequest): Record<string, unknown> { return req.par
 async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> {
   if (req.method === "ping") { if (chromeReady) await chromeReady.catch(() => {}); return pingBody(); }
   await ensureChrome();
-  browser!.raw.rpc = { id: req.id, op: req.method };
-  try {
-    const params = paramsOf(req);
-    switch (req.method) {
-      case "run.begin": {
-        if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
-        const record = liveRecordName(); if (record) throw Object.assign(new Error(`录制 ${record} 正在进行，请先 record stop 或 record abort`), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record" } });
-        if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } });
-        activeRunConn = conn; conn.runActive = true;
-        try {
-          browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
-          const page = await context!.newPage(); return { pageId: page.targetId };
-        } catch (error) {
-          await runEnd(conn);
-          throw error;
-        }
+  await reconciled;
+  const params = paramsOf(req);
+  switch (req.method) {
+    case "run.begin": {
+      if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
+      const record = liveRecordName(); if (record) throw Object.assign(new Error(`录制 ${record} 正在进行，请先 record stop 或 record abort`), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record" } });
+      if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } });
+      activeRunConn = conn; conn.runActive = true;
+      try {
+        browser!.raw.commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
+        const page = await context!.newPage(); return { pageId: page.targetId };
+      } catch (error) {
+        await runEnd(conn);
+        throw error;
       }
-      case "run.end": await runEnd(conn); return {};
-      case "cdp.send": {
-        if (!conn.runActive) throw new Error("cdp.send 只能在 run 中使用");
-        const method = String(params.method ?? "");
-        if (!method) throw Object.assign(new Error("缺少 CDP method"), { code: RPC_ERRORS.INVALID_PARAMS });
-        const page = pageById(params.pageId);
-        return await browser!.raw.send(method, (params.params as Record<string, unknown> | undefined) ?? {}, page.sessionId, typeof params.timeoutMs === "number" ? params.timeoutMs : undefined);
-      }
-      case "record.start": {
-        if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后再 record start"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
-        if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } }); recordBusy = true;
-        try { return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
-        catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
-        finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }
-      }
-      case "record.stop": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("stop"); } finally { recordBusy = false; await settleIdle(); } }
-      case "record.abort": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("abort"); } finally { recordBusy = false; await settleIdle(); } }
-      default: throw Object.assign(new Error(`未知 method：${String(req.method)}`), { code: RPC_ERRORS.METHOD_NOT_FOUND });
     }
-  } finally { if (browser) browser.raw.rpc = undefined; }
+    case "run.end": await runEnd(conn); return {};
+    case "cdp.send": {
+      if (!conn.runActive) throw new Error("cdp.send 只能在 run 中使用");
+      const method = String(params.method ?? "");
+      if (!method) throw Object.assign(new Error("缺少 CDP method"), { code: RPC_ERRORS.INVALID_PARAMS });
+      const page = pageById(params.pageId);
+      return await browser!.raw.send(method, (params.params as Record<string, unknown> | undefined) ?? {}, page.sessionId, typeof params.timeoutMs === "number" ? params.timeoutMs : undefined);
+    }
+    case "record.start": {
+      if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后再 record start"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
+      if (recordBusy) throw Object.assign(new Error("录制操作正在进行，请稍后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record-op" } }); recordBusy = true;
+      try { return await startRecord(browser!, context!, { name: typeof params.name === "string" ? params.name : undefined }); }
+      catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
+      finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }
+    }
+    case "record.stop": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("stop"); } finally { recordBusy = false; await settleIdle(); } }
+    case "record.abort": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("abort"); } finally { recordBusy = false; await settleIdle(); } }
+    default: throw Object.assign(new Error(`未知 method：${String(req.method)}`), { code: RPC_ERRORS.METHOD_NOT_FOUND });
+  }
 }
 
 function responseError(id: string, error: unknown): JsonRpcResponse { const status = handshakeStatusFromError(error); if (status) return { jsonrpc: "2.0", id, error: { code: RPC_ERRORS.HANDSHAKE, message: HANDSHAKE_GUIDES[status], data: { status } } }; const value = error as { code?: number; data?: unknown }; return { jsonrpc: "2.0", id, error: { code: typeof value?.code === "number" ? value.code : RPC_ERRORS.INTERNAL, message: error instanceof Error ? error.message : String(error), ...(value?.data === undefined ? {} : { data: value.data }) } }; }
@@ -188,7 +189,9 @@ function onRelay(sock: net.Socket): void {
           link.attach((out) => sock.write(frame(out)));
           helloDone = true;
           logger.info("extension connected");
-          void ensureChrome().catch(warnCatch("connect on hello"));
+          reconciled = ensureChrome()
+            .then(() => context!.reconcile({ recordLive: liveRecordName() !== null, runActive: activeRunConn !== null }))
+            .catch(warnCatch("reconcile on hello"));
           return;
         }
         link.receive(msg);

@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { YODO_HOME } from "../utils/constants.ts";
 
@@ -16,5 +15,3 @@ export function writeShim(nodePath: string = process.execPath): string[] {
   fs.writeFileSync(cmd, `@echo off\r\n"${nodePath}" "${ENTRY}" %*\r\n`);
   return [sh, cmd];
 }
-
-export const HOME_DIR = os.homedir();

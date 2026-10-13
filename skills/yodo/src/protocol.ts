@@ -1,5 +1,4 @@
 export type HandshakeStatus = "need-install" | "need-chrome" | "need-extension";
-export type StdoutStatus = HandshakeStatus | "recording" | "stopped" | "aborted" | "idle" | "success" | "failure";
 export type RpcMethod = "ping" | "run.begin" | "run.end" | "cdp.send" | "record.start" | "record.stop" | "record.abort";
 export type JsonRpcRequest = { jsonrpc: "2.0"; id: string; method: RpcMethod; params?: Record<string, unknown> };
 /** 页面事件推送：sessionId 即 pageId（tab 的字符串形式）。 */
@@ -16,19 +15,8 @@ export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {
   "need-extension": "yodo 的 Chrome 扩展没有连上。请按顺序做：\n1. 在 Chrome 地址栏打开 chrome://extensions，确认 yodo 是开启状态。如果找不到 yodo，告诉我，我会先运行安装命令。\n2. 在 yodo 卡片上点「service worker」，或点一下浏览器工具栏里的 yodo 图标。\n3. 做完后告诉我「好了」，我会重新运行刚才的命令。\n如果还是失败，告诉我，我会运行 yodo doctor 查看具体原因。",
 };
 
-export const HANDSHAKE_MARKS: Record<HandshakeStatus, string> = {
-  "need-install": "yodo:need-install",
-  "need-chrome": "yodo:need-chrome",
-  "need-extension": "yodo:need-extension",
-};
-const STATUSES = Object.keys(HANDSHAKE_MARKS) as HandshakeStatus[];
-
 export function isHandshakeStatus(status: string): status is HandshakeStatus {
   return status in HANDSHAKE_GUIDES;
-}
-export function handshakeStatusFromMark(text: string): HandshakeStatus | null {
-  for (const status of STATUSES) if (text.includes(HANDSHAKE_MARKS[status])) return status;
-  return null;
 }
 export function handshakeStatusFromError(error: unknown): HandshakeStatus | null {
   if (!(error instanceof Error)) return null;

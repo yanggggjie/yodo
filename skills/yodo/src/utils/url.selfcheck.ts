@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseUrl, serializeUrl, urlOrigin, isSameSite, registrableDomain } from "./url.ts";
+import { parseUrl, serializeUrl, isSameSite, registrableDomain } from "./url.ts";
 
 const encoded = parseUrl(
   "https://example.com/search?type=content&q=%E9%9F%A9%E5%9B%BD",
@@ -11,7 +11,6 @@ assert.equal(
   serializeUrl({ bareUrl: "https://example.com/search", query: { q: "韩国" } }),
   "https://example.com/search?q=%E9%9F%A9%E5%9B%BD",
 );
-assert.equal(urlOrigin(encoded), "https://example.com");
 
 assert.equal(registrableDomain(parseUrl("https://www.zhihu.com/path")), "zhihu.com");
 assert.equal(registrableDomain(parseUrl("https://api.zhihu.com/x")), "zhihu.com");
