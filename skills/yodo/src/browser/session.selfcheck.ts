@@ -131,14 +131,14 @@ function fakeRaw(ops: TabOps, sent: Sent[], tabs?: Map<number, { title: string }
   assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 2);
 }
 
-// 3. 录制窗：focused=true，窗口 id 直接来自 openWindow
+// 3. 录制窗：focused=false（不抢用户焦点），窗口 id 直接来自 openWindow
 {
   const { ops, calls } = fakeTabs();
   const sent: Sent[] = [];
   const { raw } = fakeRaw(ops, sent);
   const ctx = new CdpContext(raw);
   const rec = await ctx.openRecordWindow();
-  assert.ok(calls.includes("openWindow:focused=true"));
+  assert.ok(calls.includes("openWindow:focused=false"));
   assert.equal(typeof rec.windowId, "number");
   assert.ok(sent.some((s) => s.method === "Runtime.evaluate" && String(s.params?.expression ?? "").includes(RECORD_WINDOW_TITLE)));
   assert.ok(!sent.some((s) => s.method === "Page.bringToFront"));

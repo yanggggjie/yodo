@@ -8,7 +8,6 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
 import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
-import { revealPath } from "./src/cli/reveal.ts";
 import { ensureHomeLayout } from "./src/store/layout.ts";
 import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
 
@@ -55,7 +54,6 @@ if (!fs.existsSync(path.join(DEST, DEPS_MARKER))) {
 installNativeHost(process.execPath);
 console.log(`native messaging host 已注册 → ${manifestPath()}`);
 console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
-if (!process.env.YODO_NO_REVEAL) revealPath(EXTENSION_DIR);
 
 ensureHomeLayout();
 writeShim(process.execPath);

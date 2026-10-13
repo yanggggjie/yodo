@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-pack-"));
-const env = { ...process.env, HOME, USERPROFILE: HOME, YODO_NO_REVEAL: "1" };
+const env = { ...process.env, HOME, USERPROFILE: HOME };
 
 function findSkillDir() {
   const hits = [];

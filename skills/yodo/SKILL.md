@@ -11,7 +11,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 ## 1. 流程
 
 1. `yodo run` 列出 task 摘要。有能完成当前目标的 task，直接运行。
-2. 没有可用 task：`yodo record start`，请用户在标题为 `yodo record` 的窗口里演示一遍，用户回复后 `yodo record stop`。
+2. 没有可用 task：`yodo record start`，告诉用户切换到标题为 `yodo record` 的窗口演示一遍（窗口在后台打开，不会自动跳到前台），用户回复后 `yodo record stop`。
 3. 读取 stop 返回的 `timeline` 与 `recordDir` 下的响应文件，写一个新 task。
 4. `yodo run <task> <参数>`。`status: success` 才算完成。通过后把文件头的 `@status` 改为 `verified`。
 
@@ -24,7 +24,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 | `yodo run` | 列出 task 摘要（名称、`@status`、`@summary`、参数） |
 | `yodo run <task> [args...]` | 运行 task，stdout 输出 JSON |
 | `yodo eval '<代码>'` | 顺序组合多个 task，stdout 输出 JSON（见第 5.1 节） |
-| `yodo record start [name]` | 开始录制，打开标题为 `yodo record` 的窗口 |
+| `yodo record start [name]` | 开始录制，在后台打开标题为 `yodo record` 的窗口 |
 | `yodo record stop` | 结束录制，输出 `recordDir` 与 `timeline` |
 | `yodo record abort` | 放弃录制 |
 | `yodo doctor [--json]` | 只读检查安装与连接状态；`--json` 输出 `{ ok, checks }`，失败项带 `fix` |
@@ -34,7 +34,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 - `yodo run` 与 `yodo eval` 的 stdout 是 JSON：`status` 与 `result`。结果总是完整输出在 stdout，不会因为太大而改成文件路径。
 - 每次运行的输入与输出也会保存到 `~/.yodo/run/<task>/`（`eval` 保存到 `run/compose/`），每个 task 保留最近 20 份。只用于排查问题，不影响 stdout。
 - 以 `status` 为准：`success` 退出码为 0；`failure` 和 `need-*` 退出码都非零。任何命令失败时，stdout 都是 `{ "status": "failure", "error": "..." }`。是否重试、是否修改 task，由你根据错误信息决定。
-- 同一时间只能运行一个 task。另一个 task 正在运行时，会自动等待最多 30 秒再开始；仍被占用则失败，稍后重试同一条命令。录制进行中不能运行 task，需先 `yodo record stop` 或 `yodo record abort`。
+- 同一时间只能运行一个 task。另一个 task 正在运行时，会自动等待最多 30 秒再开始；仍被占用则失败，稍后重试同一条命令。不要并行发起多个 `yodo run` 或 `yodo eval`，按顺序一个接一个运行。录制进行中不能运行 task，需先 `yodo record stop` 或 `yodo record abort`。
 - 超时分两层：单个步骤（`evaluate`、`goto`、`waitForSelector`、`expectRequest`）默认最长 30 秒；整个 task 默认最长 90 秒。超时会被终止并按失败返回，错误里会说明是哪一层。`yodo eval` 对每个内层 task 单独计时。
 - `yodo eval` 中某个内层 task 失败时，还会带 `failedTask`，值为该 task 名。
 - 输出 `need-install`、`need-chrome` 或 `need-extension` 时，把 `guide` 原样告诉用户，等待用户回复「好了」，然后重新运行同一条命令。不要改写 `guide`，不要轮询。

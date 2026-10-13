@@ -7,7 +7,7 @@ export type JsonRpcError = { code: number; message: string; data?: unknown };
 export type JsonRpcResponse = { jsonrpc: "2.0"; id: string; result: unknown } | { jsonrpc: "2.0"; id: string; error: JsonRpcError };
 export type RpcMessage = JsonRpcResponse | JsonRpcNotification;
 
-export const RPC_ERRORS = { PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL: -32603, PAGE_NOT_FOUND: -32001, RUN_BUSY: -32002, FORBIDDEN_CDP: -32003, QUEUE_OVERFLOW: -32004, HANDSHAKE: -32010 } as const;
+export const RPC_ERRORS = { PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL: -32603, PAGE_NOT_FOUND: -32001, RUN_BUSY: -32002, HANDSHAKE: -32010 } as const;
 
 export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {
   "need-install": "yodo 的 Chrome 扩展或 native messaging 注册还没装好。请告诉我，我会运行安装命令；装好后在 chrome://extensions 里加载 yodo 扩展，完成后告诉我「好了」。",

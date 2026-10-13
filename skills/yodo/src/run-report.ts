@@ -1,6 +1,5 @@
 /**
  * client 侧的 task run 输出格式化：console 捕获、success/failure JSON、栈裁剪。
- * 从旧 exec/index.ts 迁来——task 现在在 client 进程跑，这些也搬到 client。
  */
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
