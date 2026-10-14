@@ -87,8 +87,10 @@ await yodo.run(async ({ page }) => {
 
 - `evaluate(page, fn, ...args)`：在页面内执行函数，参数必须可 JSON 序列化。注意 `page` 对象本身没有 `evaluate` 方法，必须用这个函数。
 - `page.cdp.send(method, params)`：页面级 CDP 命令。
-- `page.cdp.on(event, listener)`：监听页面事件。
-- `goto`、`click`、`fill`、`press`、`scroll`、`check`、`select`、`waitForSelector`：页面操作。
+- `page.cdp.on(event, listener)`：监听页面事件。监听函数里抛出的错误会让这次 run 失败，错误信息就是你抛出的那个。
+- `goto(page, url, { until, timeout })`：导航并等待。`until` 默认 `"domcontentloaded"`（页面解析完），也可以是 `"load"`，或 `"commit"`（只等导航提交，页面可能还在解析，用于页面脚本卡住、一直不触发 DOMContentLoaded 的网站，之后自己等需要的元素）。只改 hash 或 pushState 这类不换文档的跳转，页面内路由一变就算完成。
+- `click`、`fill`、`press`、`check`、`select`、`toggle`：页面操作。第二个参数是定位：CSS 选择器字符串，或 `{ role, name }`（无障碍角色和名称，与录制里的 `role`、`name` 相同，优先用它）。`role`/`name` 必须唯一，有多个匹配会报错并给出数量，改用更具体的 name 或 CSS。动作会自动等待元素可见且可操作，默认 10 秒，`{ timeout }` 可改。
+- `scroll`、`waitForSelector`：页面操作，只接受 CSS 选择器。
 - `toggle(page, selector, { target: true | false })`：先读状态，已满足则返回 `already`，否则点击一次返回 `done`。有副作用的操作用它。
 - `expectRequest(page, { method, path }, action)`：执行 action，并等待它触发的请求完成，返回 `{ status, body }`。会发请求的操作用它判断是否成功。没有对应请求说明操作没有生效。
 - 不要在 task 里关闭用户已有的 tab，不要修改 holder 的状态。

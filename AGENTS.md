@@ -133,6 +133,11 @@ skills/yodo/
 - 并发：holder 同时只允许一个 run。`run.begin` 遇到另一个 run 或录制操作（错误的 `data.reason` 为 `run` 或 `record-op`）时，SDK 每 500ms 重试，最多 `RUN_BUSY_WAIT_MS`（30 秒）；`reason` 为 `record`（录制进行中）时不等待，直接报错。
 - task 文件头只认文件开头第一个块注释里的 `@标签`；读不了的文件在 `yodo run` 列表里标为 `status: "invalid"`，不影响其它 task。
 - 超时只有两层：单步骤 `STEP_TIMEOUT_MS`（30 秒，`src/templates/task-lib/page.js`，用于 `evaluate`、`goto`、`waitForSelector`、`expectRequest`；单条 CDP 命令的 `CDP_COMMAND_TIMEOUT_MS` 同为 30 秒）；整个 task 子进程 `TASK_TIMEOUT_MS`（90 秒），task 头部可用 `@timeout <秒>` 覆盖。超时被 SIGKILL 终止并按失败返回，`eval` 对每个内层 task 单独计时。
+- `goto` 默认等 DOMContentLoaded，且只认本次导航提交（主框架 `frameNavigated`）之后的事件，上一个页面还没发完的加载事件不算数；`until: "commit" | "load"` 可选；不换文档的跳转（hash、pushState）等 `navigatedWithinDocument`，提交之后出现的不算。`evaluate` 不发 `Runtime.enable`（`Runtime.evaluate` 不需要它，每次 enable 会让 Chrome 重发全部执行上下文事件）。`cdp.once` 不指定 `timeout` 时用单条命令的上限，不会一直挂着。
+- 连接的读写按 UTF-8 解码（`socket.setEncoding("utf8")`，两端都是）：一个汉字的三个字节可能被拆在两个数据块里，按块 `toString()` 拼接会把它变成替换字符。
+- `RpcPeer.failure`：连接意外断开、或监听函数抛错时 reject；`yodo.run` 把它和 task 函数赛跑，task 不会因此一直挂着，监听函数里的错误成为这次 run 的失败，而不是进程的未捕获异常。daemon 写队列超限（单条 16 MB、排队 64 MB）时，先写一行没有 id 的错误说明原因再断开连接，client 把它作为失败原因。
+- run 结束（`runEnd`）：关掉本次 run 的 tab，以及 run 期间在 run 窗口里新开的 tab（点 `target=_blank` 链接等，扩展按 opener 纳入），锚点保留。清理做完才释放模式，下一个 `run.begin` 不会和清理同时操作 run 窗口。`window.open` 带窗口特征弹出的独立窗口不在这里处理。
+- 定位（`templates/task-lib/locate.js`）：目标是 CSS 字符串或 `{ role, name }`。role/name 用 `Accessibility.queryAXTree`（根是 `document` 对象）查找，`DOM.resolveNode` 转成元素，必须唯一；CSS 保持取第一个匹配的旧行为。动作（click、fill、press、check、select、toggle）先等元素存在、可见且未禁用，默认 `ACTION_TIMEOUT_MS`（10 秒），超时报出在等什么。
 - `waitForSelector` 在 Node 侧轮询，不在页面里跑长循环；它没有 `timeout` 参数，固定使用单步骤上限。
 - `RpcPeer`（`src/cli/rpc.ts`）是唯一的 socket 客户端：`sessionRpc` 是一次一连接的用法，SDK 用它保持长连接并接收页面事件。
 
@@ -195,11 +200,19 @@ ping
 - 录制窗口里用户自己新开的 tab 会被纳入：扩展纳入后宿主按窗口规则 attach。新标签页是 `chrome://` 页面，无法 attach；用户在里面首次导航后才 attach，第一次文档请求可能记成补抓的主文档（`late: true`）。
 - `record stop` 输出 `status`、`name`、`recordDir`、`timeline`；有页面的动作没录到时多一个 `warnings` 数组。
 
+### 4.5.1 模式（run / 录制互斥）
+
+`src/mode.ts` 的 `Mode` 是 daemon 里"忙不忙"的唯一来源：`idle`、`run`、`record-op`（start / stop / abort 正在执行）、`record`（录制进行中，由 `liveRecordName()` 提供，不重复保存）。`RUN_BUSY` 的判断、`reason`（`run`、`record-op`、`record`）和提示文字只在这里定义；SDK 靠 `reason` 决定要不要等（`run`、`record-op` 等，`record` 不等）。`ping` 返回 `mode`，`daemon.exit` 也读它。
+
 ### 4.6 存储与安装
 
 - 用户数据目录只有 `~/.yodo/task`、`~/.yodo/record`，运行时状态在 `~/.yodo/session`，运行时代码在 `~/.yodo/src`。
 - 运行历史写入 `~/.yodo/run/<task>/<时间戳>.json`（`eval` 为 `run/compose/`），保存输入参数与输出，每个 task 保留最近 20 份。
 - 没有 `state.json`，不做失败统计，不做重试限制。
-- `setup.js` 是安装引导脚本，依赖 skill 包本身，负责拷贝运行时、安装依赖、注册 native host、生成 shim、运行 `doctor`。
+- `setup.js` 是安装引导脚本，依赖 skill 包本身，负责拷贝运行时、安装依赖、写版本文件、注册 native host、生成 shim、让过期的 daemon 换成新代码、运行 `doctor`。
+- 部署只拷运行时代码：排除 `node_modules`、`*.selfcheck.*`、`record/fixtures/`（规则是 `store/deploy.ts` 的 `isRuntimePath`，版本哈希用同一条）。`dev/rpc.ts` 被 `holder.ts` 静态 import，要部署；它默认关闭，由 `~/.yodo/session/dev` 控制。
+- 版本：`setup.js` 在 `~/.yodo/src/.version` 写 `{ build, extension }`（`store/version.ts`）。`build` 是运行时代码内容的哈希；`extension` 是 `chrome-extension/background.js` 与 `manifest.json` 字节依次拼接后 SHA-256 的前 16 位十六进制，扩展启动时对自己的两个文件算同一个值，随 `hello` 的 `buildId` 发给 daemon。开发时直接从仓库运行没有 `.version`，不做版本比较。
+- daemon 的版本：启动时记下自己的 `build`，`ping` 返回 `build`、`mode`、`extensionBuild`。`ensureAttached`（CLI 与 SDK 共用）和 `setup.js` 发现 `build` 与磁盘上的不同、且 `mode` 为 `idle` 时，发 `daemon.exit`（只在空闲时接受，先回应再退出），daemon 退出后 relay 随之退出，扩展按指数退避重连，Chrome 重新拉起 relay，relay 拉起新 daemon。忙（run、录制）时不动它，下一次空闲时的第一条命令再换；每次调用最多重启一次；旧 daemon（`ping` 里没有 `mode`）不动。扩展没连着时只让它退出，不等新的。
+- 扩展代码的更新不能自动完成：`doctor` 的 `extension-build` 在已加载的扩展与已安装的不同时提示"在 chrome://extensions 里刷新 yodo"。
 - `yodo doctor` 只读。
 

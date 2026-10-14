@@ -7,6 +7,8 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
+import { readVersion, writeVersion } from "./src/store/version.ts";
+import { restartStaleDaemon } from "./src/cli/session.ts";
 import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
 import { ensureHomeLayout } from "./src/store/layout.ts";
 import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
@@ -51,6 +53,9 @@ if (!fs.existsSync(path.join(DEST, DEPS_MARKER))) {
   process.exit(1);
 }
 
+const version = writeVersion(DEST);
+console.log(`yodo 版本 → ${version.build}`);
+
 installNativeHost(process.execPath);
 console.log(`native messaging host 已注册 → ${manifestPath()}`);
 console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
@@ -58,6 +63,13 @@ console.log(`请在 chrome://extensions 开启开发者模式，点「加载已�
 ensureHomeLayout();
 writeShim(process.execPath);
 console.log(`yodo 命令 shim → ${BIN_DIR}`);
+
+// 正在运行的 daemon 还是旧代码：空闲就请它退出，扩展重连时会拉起新的；忙就留给下一条命令。
+const stale = await restartStaleDaemon({ version: () => readVersion(DEST) });
+if (stale.action === "restarted") console.log("daemon 已更新为新版本");
+else if (stale.action === "exited") console.log("旧 daemon 已退出，扩展重连时会启动新的");
+else if (stale.action === "busy") console.log("daemon 正忙，空闲后的第一条命令会自动更新它");
+else if (stale.action === "failed") console.log("旧 daemon 已退出，但新 daemon 还没连上；请稍等，或在 chrome://extensions 刷新 yodo");
 
 const doctor = spawnSync(process.execPath, [path.join(DEST, "cli", "yodo.ts"), "doctor"], {
   stdio: "inherit",

@@ -31,6 +31,7 @@ globalThis.chrome = {
       };
     },
     getManifest: () => ({ version: "0.1.0" }),
+    getURL: (name) => `chrome-extension://fake/${name}`,
     onStartup: onEvt("startup"),
     onInstalled: onEvt("installed"),
   },
@@ -62,6 +63,14 @@ globalThis.chrome = {
   },
 };
 
+// 扩展用 fetch(chrome.runtime.getURL(...)) 读自己的文件算 buildId；这里用固定内容代替
+const extensionFiles = { "background.js": Buffer.from("bg-bytes\n"), "manifest.json": Buffer.from("{}\n") };
+globalThis.fetch = async (url) => {
+  const name = String(url).split("/").pop();
+  if (!(name in extensionFiles)) throw new Error("not found");
+  const bytes = extensionFiles[name];
+  return { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+};
 await import(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "background.js") + "?t=1");
 await new Promise((r) => setTimeout(r, 10));
 
@@ -69,6 +78,10 @@ await new Promise((r) => setTimeout(r, 10));
 assert.deepEqual(calls.find((c) => c[0] === "connectNative"), ["connectNative", "com.yodo.connect"]);
 assert.equal(posted[0].type, "hello");
 assert.equal(posted[0].protocolVersion, 1);
+// hello 带 buildId，算法和 store/version.ts 里的 extension 一致
+const { createHash } = await import("node:crypto");
+const expectedBuild = createHash("sha256").update(extensionFiles["background.js"]).update(extensionFiles["manifest.json"]).digest("hex").slice(0, 16);
+assert.equal(posted[0].buildId, expectedBuild);
 assert.deepEqual(calls.find((c) => c[0] === "alarm"), ["alarm", "yodo-keepalive", 0.5]);
 
 const host = (msg) => portListeners.message(msg);

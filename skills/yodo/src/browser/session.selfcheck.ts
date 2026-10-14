@@ -240,4 +240,22 @@ function fakeRaw(ops: TabOps, sent: Sent[], tabs?: Map<number, { title: string }
   assert.deepEqual([...tabs.values()].map((t) => t.title), [RUN_WINDOW_TITLE]);
 }
 
+// 9. run 结束：关掉本次 run 的 tab，以及 run 期间在 run 窗口里新开的 tab（点 target=_blank 链接等）；锚点和别的窗口不动
+{
+  const { ops, tabs, calls } = fakeTabs();
+  const { raw } = fakeRaw(ops, [], tabs);
+  const ctx = new CdpContext(raw);
+  const page = await ctx.newPage();
+  const runWindow = tabs.get(Number(page.targetId))!.windowId;
+  const anchorId = [...tabs].find(([id, v]) => v.windowId === runWindow && String(id) !== page.targetId)![0];
+  tabs.set(950, { windowId: runWindow, url: "https://opened.example", title: "opened by the task" }); // 扩展按 opener 纳入的新 tab
+  tabs.set(951, { windowId: 777, url: "https://other.example", title: "" }); // 别的窗口里的 yodo tab：这里不处理
+  await ctx.endRunTab();
+  assert.ok(calls.includes(`closeTab:${page.targetId}`), "本次 run 的 tab 被关闭");
+  assert.ok(calls.includes("closeTab:950"), "run 期间新开的 tab 被关闭");
+  assert.ok(!calls.includes(`closeTab:${anchorId}`), "锚点不关");
+  assert.ok(!calls.includes("closeTab:951"), "别的窗口里的 tab 不关");
+  assert.equal(tabs.has(anchorId), true);
+}
+
 console.log("browser session selfcheck ok");

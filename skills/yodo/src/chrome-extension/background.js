@@ -49,6 +49,27 @@ function postToHost(message) {
   if (port) port.postMessage(message);
 }
 
+/**
+ * 对自己的 background.js 与 manifest.json 取哈希，随 hello 发给 daemon；
+ * 算法与 setup.js 写进 .version 的 extension 一致（两个文件的字节依次拼接，SHA-256 取前 16 位十六进制）。
+ * 读不到就是空串，daemon 一侧只当"版本未知"。
+ */
+const buildId = (async () => {
+  try {
+    const parts = [];
+    for (const name of ["background.js", "manifest.json"]) {
+      parts.push(new Uint8Array(await (await fetch(chrome.runtime.getURL(name))).arrayBuffer()));
+    }
+    const all = new Uint8Array(parts[0].length + parts[1].length);
+    all.set(parts[0]);
+    all.set(parts[1], parts[0].length);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
+    return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+  } catch {
+    return "";
+  }
+})();
+
 function connect() {
   if (port) return;
   try {
@@ -65,11 +86,16 @@ function connect() {
     scheduleRetry();
   });
   retryCount = 0;
-  port.postMessage({
-    type: "hello",
-    protocolVersion: PROTOCOL_VERSION,
-    chromeVersion: navigator.userAgent,
-    extensionVersion: chrome.runtime.getManifest().version,
+  const current = port;
+  void buildId.then((id) => {
+    if (port !== current) return; // 等哈希的时候连接已经断了
+    current.postMessage({
+      type: "hello",
+      protocolVersion: PROTOCOL_VERSION,
+      chromeVersion: navigator.userAgent,
+      extensionVersion: chrome.runtime.getManifest().version,
+      buildId: id,
+    });
   });
 }
 

@@ -13,18 +13,24 @@ export function safeRemove(p: string): void {
   else fs.rmSync(p, { recursive: true, force: true });
 }
 
-function isUnderNodeModules(srcAbs: string, src: string): boolean {
-  const rel = path.relative(srcAbs, src);
-  if (!rel || rel.startsWith("..")) return false;
-  return rel.split(path.sep).includes("node_modules");
+/**
+ * 哪些路径算运行时代码：排除 node_modules、自检（*.selfcheck.*）和夹具（fixtures/）。
+ * 部署拷贝和版本哈希用同一条规则，不然测试文件的改动会触发不必要的重启。
+ */
+export function isRuntimePath(root: string, p: string): boolean {
+  const rel = path.relative(root, p);
+  if (!rel || rel.startsWith("..")) return true;
+  const parts = rel.split(path.sep);
+  if (parts.includes("node_modules") || parts.includes("fixtures")) return false;
+  return !/\.selfcheck\./.test(parts[parts.length - 1]!);
 }
 
-/** 把 srcAbs 整目录拷到 destAbs。不拷 `node_modules/`。先清空 dest。 */
+/** 把 srcAbs 的运行时代码拷到 destAbs（规则见 isRuntimePath）。先清空 dest。 */
 export function copyRuntime(srcAbs: string, destAbs: string): void {
   safeRemove(destAbs);
   fs.mkdirSync(path.dirname(destAbs), { recursive: true });
   fs.cpSync(srcAbs, destAbs, {
     recursive: true,
-    filter: (src) => !isUnderNodeModules(srcAbs, src),
+    filter: (src) => isRuntimePath(srcAbs, src),
   });
 }

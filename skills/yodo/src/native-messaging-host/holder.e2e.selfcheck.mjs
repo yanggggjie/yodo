@@ -103,13 +103,16 @@ const waitFor = async (fn, ms = 8000) => { const end = Date.now() + ms; for (;;)
 const child = spawn(process.execPath, [RELAY], { env, stdio: ["pipe", "pipe", "pipe"], cwd: SRC });
 child.stderr.on("data", (d) => { if (process.env.E2E_DEBUG) process.stderr.write(d); });
 const ext = fakeExtension(child);
-child.stdin.write(frame({ type: "hello", protocolVersion: 1, chromeVersion: "Chrome/e2e" }));
+child.stdin.write(frame({ type: "hello", protocolVersion: 1, chromeVersion: "Chrome/e2e", buildId: "ext-build-1" }));
 
 await waitFor(() => fs.existsSync(SOCK));
 await waitFor(async () => (await rpc("ping")).chrome === "Chrome/e2e");
 const ping = await rpc("ping");
 assert.equal(ping.chrome, "Chrome/e2e", "hello 里的 chromeVersion 应回传到 ping");
 assert.equal(ping.extension, true, "扩展链路接着时 ping.extension 为 true");
+assert.equal(ping.mode, "idle", "空闲时 ping.mode 为 idle");
+assert.equal(typeof ping.build, "string", "ping 带 daemon 的 build（开发时没有 .version，为空串）");
+assert.equal(ping.extensionBuild, "ext-build-1", "hello 里的 buildId 回传到 ping.extensionBuild");
 console.log("ping ok:", ping.chrome);
 
 // 第二个 daemon：扩展通道 socket 活着，应当直接退出，不覆盖
@@ -121,6 +124,8 @@ console.log("singleton ok");
 const page = await rpc("run.begin");
 assert.ok(page.pageId, "run.begin 返回 pageId");
 console.log("run.begin ok, pageId=", page.pageId);
+assert.equal((await rpc("ping")).mode, "run", "run 进行中 ping.mode 为 run");
+await assert.rejects(rpc("daemon.exit"), /正忙/, "run 进行中 daemon 不能退出");
 
 // 页面事件推送：扩展上报的 tab 事件应按 pageId 推给当前 run
 child.stdin.write(frame({ type: "event", tabId: Number(page.pageId), method: "Page.loadEventFired", params: { timestamp: 1 } }));
@@ -144,6 +149,9 @@ closeRpc();
 
 const rec = await rpc("record.start", { name: "e2e" });
 console.log("record.start:", String(rec).slice(0, 120).replace(/\n/g, " "));
+assert.equal((await rpc("ping")).mode, "record", "录制进行中 ping.mode 为 record");
+await assert.rejects(rpc("daemon.exit"), /正忙/, "录制进行中 daemon 不能退出");
+await assert.rejects(rpc("run.begin"), (e) => e.data?.reason === "record", "录制进行中 run.begin 的 reason 是 record，SDK 不会等");
 const stopped = await rpc("record.stop");
 console.log("record.stop:", String(stopped).slice(0, 160).replace(/\n/g, " "));
 const recordFiles = fs.existsSync(path.join(HOME, ".yodo", "record")) ? fs.readdirSync(path.join(HOME, ".yodo", "record")) : [];
@@ -179,7 +187,8 @@ relay2.stdin.end();
 await new Promise((r) => relay2.on("exit", r));
 closeRpc();
 
-process.kill(daemonPid, "SIGTERM");
+// 空闲时 daemon.exit 先回应再退出（与 SIGTERM 走同一个 shutdown）
+await rpc("daemon.exit");
 await waitFor(async () => !fs.existsSync(SOCK));
 assert.equal(fs.existsSync(path.join(SESSION, "ext.sock")), false, "daemon 退出后扩展 socket 应被删除");
 console.log("shutdown ok");

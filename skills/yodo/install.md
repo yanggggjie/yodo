@@ -33,6 +33,8 @@ node <安装目录>/setup.js
 3. 已经加载过：在 yodo 扩展卡片上点刷新。
 4. 完成后回复「好了」。
 
+daemon 不用手动重启：`setup.js` 会让空闲的旧 daemon 退出，并在扩展重连时换成新的；正忙时下一条命令会自动换。扩展本身不能自动更新，扩展代码有改动时 `doctor` 的 `extension-build` 会提示刷新。
+
 刷新扩展会断开旧的 relay，Chrome 随后用新的 manifest 重新拉起 relay。relay 只转发消息，daemon 常驻不受影响；扩展代码或 relay 代码有改动时，必须做这一步才会生效。
 
 ## 5. 验收
@@ -45,6 +47,7 @@ node <安装目录>/setup.js
 
 - 所有检查通过：报告安装成功。
 - 扩展未连接（`need-extension`）：请用户打开 `chrome://extensions` 确认扩展已开启，并点一下扩展的 service worker 或工具栏图标，然后重新运行 `doctor`。
+- `extension-build` 提示扩展版本不同或没有报告版本：请用户在 `chrome://extensions` 里刷新 yodo 扩展，再重新运行 `doctor`。
 - 其它失败：按 `doctor` 输出的修复命令处理，再重新运行 `doctor`。
 
 ## 6. 报告

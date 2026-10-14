@@ -25,10 +25,26 @@ export class RpcPeer {
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private listeners = new Set<PageListener>();
   private socket: net.Socket;
+  /** daemon 在断开连接前说明原因的那一行（没有 id 的错误应答）。 */
+  private closeReason: Error | null = null;
+  /**
+   * 连接意外断开，或监听函数抛错时 reject。yodo.run 把它和 task 函数赛跑，
+   * 这样等事件的 task 不会一直挂着，监听函数里的错误也成为这次 run 的失败，而不是进程的未捕获异常。
+   */
+  readonly failure: Promise<never>;
+  private reportFailure!: (error: unknown) => void;
   private constructor(socket: net.Socket) {
     this.socket = socket;
-    socket.on("data", (chunk) => this.onData(chunk));
-    socket.on("close", () => this.rejectAll(new Error("holder 连接已关闭")));
+    this.failure = new Promise<never>((_, reject) => { this.reportFailure = reject; });
+    this.failure.catch(() => {}); // 没人赛跑时不算未处理的 rejection
+    // 按 UTF-8 解码：一个汉字的三个字节可能被拆在两个数据块里，直接 chunk.toString() 会把它变成替换字符。
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => this.onData(String(chunk)));
+    socket.on("close", () => {
+      const reason = this.closeReason ?? new Error("holder 连接已关闭");
+      if (!this.closed) this.reportFailure(reason);
+      this.rejectAll(reason);
+    });
     socket.on("error", (error) => this.rejectAll(error));
   }
   static open(sock = SESSION_SOCK): Promise<RpcPeer> {
@@ -38,8 +54,8 @@ export class RpcPeer {
       socket.once("error", reject);
     });
   }
-  private onData(chunk: Buffer): void {
-    this.buffer += chunk.toString();
+  private onData(chunk: string): void {
+    this.buffer += chunk;
     let nl: number;
     while ((nl = this.buffer.indexOf("\n")) >= 0) {
       const line = this.buffer.slice(0, nl); this.buffer = this.buffer.slice(nl + 1);
@@ -47,6 +63,8 @@ export class RpcPeer {
       let message: RpcMessage;
       try { message = JSON.parse(line) as RpcMessage; } catch { this.close(new Error("holder 返回无效 JSON")); return; }
       if ("id" in message) {
+        // 没有 id 的错误：daemon 在断开连接前说明原因（例如队列超限）
+        if (message.id === "" && "error" in message) { this.closeReason = new RpcError(message.error.code, message.error.message, message.error.data); continue; }
         const pending = this.pending.get(message.id);
         if (!pending) continue;
         this.pending.delete(message.id);
@@ -61,7 +79,7 @@ export class RpcPeer {
     const { sessionId, method, params } = notification.params;
     for (const listener of [...this.listeners]) {
       if (listener.pageId !== sessionId || listener.event !== method) continue;
-      try { listener.fn(params); } catch (error) { queueMicrotask(() => { throw error; }); }
+      try { listener.fn(params); } catch (error) { this.reportFailure(error); }
     }
   }
   request(method: RpcMethod, params?: Record<string, unknown>): Promise<unknown> {

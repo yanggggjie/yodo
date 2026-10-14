@@ -7,21 +7,35 @@ function expressionOf(fnOrString, args) {
 }
 
 export async function evaluate(page, fnOrString, ...args) {
-  await page.cdp.send("Runtime.enable");
   const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true, userGesture: true });
   if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "evaluate failed");
   return response.result.value;
 }
 
+/**
+ * 导航，并等到 options.until（默认 "domcontentloaded"）：
+ * - "commit"：导航提交，新文档已经开始，可能还在解析；
+ * - "domcontentloaded"、"load"：对应的页面事件。
+ * 只认本次导航提交之后的事件：上一个页面还没发完的加载事件不算数。
+ * 只改 hash、或者 pushState 这类同文档跳转不会提交新文档，收到 navigatedWithinDocument 就算完成。
+ * 页面一直不触发 DOMContentLoaded 时（脚本卡住），用 until: "commit" 再自己等需要的元素。
+ */
 export async function goto(page, url, options = {}) {
   await page.cdp.send("Page.enable");
   const timeout = options.timeout ?? STEP_TIMEOUT_MS;
+  const until = options.until ?? "domcontentloaded";
   let finish;
   const loaded = new Promise((resolve, reject) => { finish = (error) => error ? reject(error) : resolve(); });
+  let committed = false;
   const offs = await Promise.all([
-    page.cdp.on("Page.domContentEventFired", () => finish()),
-    page.cdp.on("Page.loadEventFired", () => finish()),
-    page.cdp.on("Page.frameNavigated", ({ frame }) => { if (!frame.parentId) finish(); }),
+    page.cdp.on("Page.frameNavigated", ({ frame }) => {
+      if (frame.parentId) return;
+      committed = true;
+      if (until === "commit") finish();
+    }),
+    page.cdp.on("Page.domContentEventFired", () => { if (committed && until === "domcontentloaded") finish(); }),
+    page.cdp.on("Page.loadEventFired", () => { if (committed && until !== "commit") finish(); }),
+    page.cdp.on("Page.navigatedWithinDocument", () => { if (!committed) finish(); }),
   ]);
   const timer = setTimeout(() => finish(new Error(`goto timeout after ${timeout}ms: ${url}`)), timeout);
   try {

@@ -312,14 +312,24 @@ export class CdpContext {
     return await this.attachTarget(String(tabId), true);
   }
 
-  /** run 结束：关闭本次 run 的 tab；锚点保留。 */
+  /** run 结束：关闭本次 run 的 tab，以及 run 期间新开的 tab（点 target=_blank 链接等，扩展按 opener 纳入）；锚点保留。 */
   async endRunTab(): Promise<void> {
     const id = this.runTabId;
-    if (id == null) return;
-    this.runTabId = null;
-    this.forgetPage(id);
-    await this.raw.ops.detach(Number(id)).catch(() => {});
-    await this.raw.ops.closeTab(Number(id)).catch(() => {});
+    if (id != null) {
+      this.runTabId = null;
+      this.forgetPage(id);
+      await this.raw.ops.detach(Number(id)).catch(() => {});
+      await this.raw.ops.closeTab(Number(id)).catch(() => {});
+    }
+    await this.closeStrayRunTabs();
+  }
+
+  /** run 窗口里除锚点外还在的 tab。只在 run 结束、没有别的 run 时调用。弹出的独立窗口不在这里处理。 */
+  private async closeStrayRunTabs(): Promise<void> {
+    if (this.runWindowId == null) return;
+    const { tabs } = await this.raw.ops.listOwned().catch(() => ({ tabs: [] }));
+    const stray = tabs.filter((t) => t.windowId === this.runWindowId && String(t.tabId) !== this.runAnchorId);
+    await Promise.all(stray.map((t) => this.raw.ops.closeTab(t.tabId).catch(() => {})));
   }
 
   /** holder 停：关掉整扇 run 窗。 */

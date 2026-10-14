@@ -3,7 +3,7 @@ import { ensureHolder } from "./cli/session.ts";
 import { RpcError, RpcPeer } from "./cli/rpc.ts";
 import { assertNode24 } from "./utils/node.ts";
 import { sleep } from "./utils/async.ts";
-import { RUN_BUSY_WAIT_MS } from "./utils/constants.ts";
+import { CDP_COMMAND_TIMEOUT_MS, RUN_BUSY_WAIT_MS } from "./utils/constants.ts";
 import { RPC_ERRORS, formatHandshakeStdout, isHandshakeStatus } from "./protocol.ts";
 import { consoleToStderr, runFailureJson, runSuccessJson } from "./run-report.ts";
 
@@ -31,9 +31,9 @@ function cdpSession(peer: RpcPeer, pageId: string): CdpSession {
           pageId,
           fn: (params) => { off(); if (timer) clearTimeout(timer); resolve(params as never); },
         });
-        if (options?.timeout != null) {
-          timer = setTimeout(() => { off(); reject(new Error(`${String(event)} timeout ${options.timeout}ms`)); }, options.timeout);
-        }
+        // 没有指定就用单条命令的上限，事件不来也不会一直挂着
+        const ms = options?.timeout ?? CDP_COMMAND_TIMEOUT_MS;
+        timer = setTimeout(() => { off(); reject(new Error(`${String(event)} timeout ${ms}ms`)); }, ms);
       });
     },
   };
@@ -74,7 +74,8 @@ export const yodo = {
       const begun = await beginRun(peer);
       const page: PageHandle = { cdp: cdpSession(peer, begun.pageId) };
       restore = consoleToStderr();
-      const result = await fn({ page });
+      // 监听函数抛错、连接意外断开，都会让 peer.failure 先 reject，成为这次 run 的失败
+      const result = await Promise.race([fn({ page }), peer.failure]);
       restore(); restore = undefined;
       console.log(runSuccessJson(result));
     } catch (error) {

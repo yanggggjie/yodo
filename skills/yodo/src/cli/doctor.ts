@@ -7,6 +7,7 @@ import {
   YODO_HOME,
 } from "../utils/constants.ts";
 import { isPidAlive, readSessionPid, tryPing } from "./session.ts";
+import { readVersion } from "../store/version.ts";
 import { chromeRunning } from "../browser/connect.ts";
 import { EXTENSION_ID, HOLDER_ENTRY, RELAY_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
 
@@ -86,6 +87,33 @@ async function collectChecks(): Promise<Check[]> {
     fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标；仍无响应则在 chrome://extensions 刷新扩展",
     optional: true,
   });
+
+  // 版本：运行中的 daemon 和已加载的扩展是不是部署目录里的最新版本。不影响退出码。
+  const installed = readVersion();
+  if (installed && ping) {
+    if (ping.mode === undefined) {
+      add({ name: "daemon-build", ok: false, detail: "旧版本的 daemon，不报告版本", fix: "结束 holder 进程，扩展重连时会启动新的", optional: true });
+    } else {
+      const same = ping.build === installed.build;
+      add({
+        name: "daemon-build",
+        ok: same,
+        detail: same ? installed.build : `运行中 ${ping.build || "(无)"}，已安装 ${installed.build}`,
+        fix: ping.mode === "idle" ? "下一条 yodo 命令会自动重启它" : "它正忙，空闲后的第一条命令会自动重启它",
+        optional: true,
+      });
+    }
+    if (ping.extension) {
+      const loaded = ping.extensionBuild ?? "";
+      add({
+        name: "extension-build",
+        ok: loaded === installed.extension,
+        detail: loaded === installed.extension ? loaded : loaded ? `已加载 ${loaded}，已安装 ${installed.extension}` : "扩展没有报告版本，可能是旧版本",
+        fix: "在 chrome://extensions 里刷新 yodo 扩展",
+        optional: true,
+      });
+    }
+  }
 
   return checks;
 }
