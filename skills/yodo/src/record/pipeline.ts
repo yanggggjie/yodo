@@ -59,10 +59,6 @@ const BASE64URL = /^[A-Za-z0-9_-]+={0,2}$/;
 type Location = Redaction["location"];
 type Result<T> = { value: T; redactions: Redaction[] };
 
-function bytes(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
-
 function shape(value: string): Redaction["shape"] {
   if (JWT.test(value)) return "jwt";
   if (UUID.test(value)) return "uuid";
@@ -89,8 +85,8 @@ export class RecordSanitizer {
       this.aliases.set(raw, alias);
     }
     const kind = shape(raw);
-    out.push({ location, path, alias, shape: kind, bytes: bytes(raw) });
-    return `⟨${alias}:${kind}:bytes=${bytes(raw)}⟩`;
+    out.push({ location, path, alias, shape: kind });
+    return `⟨${alias}:${kind}⟩`;
   }
 
   sanitizeUrl(urlText: string): Result<YodoUrl> {
@@ -328,18 +324,6 @@ export function dedupeTimeline(timeline: RawEvent[]): number {
 
 export type PipelineStage = { name: string; in: number; out: number; dropped: Record<string, number> };
 
-/** 丢掉的请求按原因计数：3xx 是 redirect，其余非 2xx（含没有状态）是 non-2xx。 */
-function droppedByStatus(before: RawEvent[], after: RawEvent[]): Record<string, number> {
-  const kept = new Set(after);
-  const dropped: Record<string, number> = {};
-  for (const e of before) {
-    if (kept.has(e)) continue;
-    const reason = typeof e.status === "number" && e.status >= 300 && e.status < 400 ? "redirect" : "non-2xx";
-    dropped[reason] = (dropped[reason] ?? 0) + 1;
-  }
-  return dropped;
-}
-
 /** 纯：2xx → adblock → 脱敏 → 去重。零 fs、零 CDP。同时返回每一级的输入数、输出数与丢弃原因。 */
 export function runPipeline(
   rawTimeline: RawEvent[],
@@ -352,7 +336,7 @@ export function runPipeline(
   const step4 = [...step3];
   const duplicates = dedupeTimeline(step4);
   const stages: PipelineStage[] = [
-    { name: "success-only", in: rawTimeline.length, out: step1.length, dropped: droppedByStatus(rawTimeline, step1) },
+    { name: "success-only", in: rawTimeline.length, out: step1.length, dropped: step1.length < rawTimeline.length ? { "non-2xx": rawTimeline.length - step1.length } : {} },
     { name: "adblock", in: step1.length, out: step2.length, dropped: step2.length < step1.length ? { adblock: step1.length - step2.length } : {} },
     { name: "sanitize", in: step2.length, out: step3.length, dropped: {} },
     { name: "dedupe", in: step3.length, out: step4.length, dropped: duplicates ? { "third-party-duplicate": duplicates } : {} },

@@ -13,7 +13,8 @@ export function consoleToStderr(): () => void {
 
 export function formatStack(err: unknown, scriptAbs: string): string[] {
   if (!(err instanceof Error)) return [String(err)];
-  const head = `${err.name}: ${err.message}`;
+  // RpcError 的 message 就是 holder 给用户的说明，加类名前缀只会添乱
+  const head = err.name === "RpcError" ? err.message : `${err.name}: ${err.message}`;
   const raw = err.stack ?? "";
   const dir = path.dirname(scriptAbs);
   const dirUrl = pathToFileURL(dir).href;

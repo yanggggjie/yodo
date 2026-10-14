@@ -299,10 +299,12 @@ export async function startCdpNetworkRecorder(
   }
 
   function sendTargetPipeline(tabId: string): void {
-    raw.send("Page.enable", {}, tabId).catch(() => {});
-    raw.send("Runtime.enable", {}, tabId).catch(() => {});
-    raw.send("Page.setBypassCSP", { enabled: true }, tabId).catch(() => {});
-    raw.send("Runtime.addBinding", { name: "__yodoEvent" }, tabId).catch(() => {});
+    // 失败要看得见：脚本没注入或 binding 没加上，整页的点击、输入、滚动就录不到
+    const warn = (what: string) => (error: unknown): void => logger.warn(`${what} 失败（tab ${tabId}）`, { err: error instanceof Error ? error.message : String(error) });
+    raw.send("Page.enable", {}, tabId).catch(warn("Page.enable"));
+    raw.send("Runtime.enable", {}, tabId).catch(warn("Runtime.enable"));
+    raw.send("Page.setBypassCSP", { enabled: true }, tabId).catch(warn("Page.setBypassCSP"));
+    raw.send("Runtime.addBinding", { name: "__yodoEvent" }, tabId).catch(warn("Runtime.addBinding"));
     raw.send(
       "Page.addScriptToEvaluateOnNewDocument",
       {
@@ -310,8 +312,8 @@ export async function startCdpNetworkRecorder(
         worldName: INJECT_WORLD,
       },
       tabId,
-    ).catch(() => {});
-    raw.send("Network.enable", networkEnableParams, tabId).catch(() => {});
+    ).catch(warn("Page.addScriptToEvaluateOnNewDocument"));
+    raw.send("Network.enable", networkEnableParams, tabId).catch(warn("Network.enable"));
   }
 
   /**

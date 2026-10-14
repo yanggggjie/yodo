@@ -14,6 +14,7 @@ export async function startFixture() {
     const url = new URL(req.url, "http://x");
     if ((req.headers.host ?? "").startsWith("tracker.")) {
       const cors = { "access-control-allow-origin": "*" };
+      if (url.pathname === "/frame") return html(res, `<!doctype html><meta charset=utf-8><button id=inner>iframe 内按钮</button>`);
       if (url.pathname === "/pixel.gif") { res.writeHead(200, { "content-type": "image/gif", ...cors }); return res.end(GIF); }
       return json(res, { ok: true }, 200, cors);
     }
@@ -34,7 +35,13 @@ export async function startFixture() {
 </script></body>`);
       case "/api/items": return json(res, items);
       case "/search": return html(res, `<!doctype html><meta charset=utf-8><title>结果</title><h1>结果：${url.searchParams.get("q") ?? ""}</h1><a id=item href="/item/1">商品 1</a>`);
-      case "/item/1": return html(res, `<!doctype html><meta charset=utf-8><title>商品 1</title><h1>商品 1</h1>`);
+      case "/item/1": return html(res, `<!doctype html><meta charset=utf-8><title>商品 1</title><h1>商品 1</h1><button id=buy>购买</button>`);
+      case "/widgets": return html(res, `<!doctype html><meta charset=utf-8><title>Widgets</title><body style="margin:0">
+<select id=color><option>red</option><option>green</option><option>blue</option></select>
+<button id=confirm onclick="document.title = confirm('确定删除？') ? 'confirmed' : 'cancelled'">删除</button>
+<button id=spa onclick="history.pushState({}, '', '/widgets/step2'); document.title='step2'">单页跳转</button>
+<a id=blank href="/item/1" target="_blank">新标签打开</a>
+<iframe src="http://tracker.localhost:${port}/frame" width=200 height=60></iframe></body>`);
       case "/old": res.writeHead(302, { location: "/search?q=redirected" }); return res.end();
       case "/login": return json(res, { ok: true });
       default: return json(res, { error: "not found" }, 404);

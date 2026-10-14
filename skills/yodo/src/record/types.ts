@@ -6,7 +6,6 @@ export type Redaction = {
   path: string;
   alias: string;
   shape: "jwt" | "uuid" | "hex" | "base64url" | "numeric" | "text" | "opaque";
-  bytes: number;
 };
 
 export type RequestKind = "document" | "xhr" | "fetch";

@@ -55,6 +55,11 @@ async function settleIdle(): Promise<void> {
   finally { browser.raw.commandTimeoutMs = previous; }
 }
 
+/** 对账：扩展（重新）连上，或录制结束关掉窗口之后，让 holder 的窗口记录与扩展里的实际一致。 */
+function reconcileNow(): Promise<void> {
+  return context!.reconcile({ recordLive: liveRecordName() !== null, runActive: activeRunConn !== null });
+}
+
 async function runEnd(conn = activeRunConn): Promise<void> {
   if (!conn || activeRunConn !== conn) return;
   if (activeRunConn === conn) activeRunConn = null;
@@ -74,7 +79,7 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
   await reconciled;
   const params = paramsOf(req);
   switch (req.method) {
-    case "dev.pages": case "dev.cdp": return devRpc(req.method, params, browser!.raw, context!);
+    case "dev.pages": case "dev.cdp": return devRpc(req.method, params, browser!.raw);
     case "run.begin": {
       if (activeRunConn) throw Object.assign(new Error("已有 task 正在运行，请等它结束后重试"), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "run" } });
       const record = liveRecordName(); if (record) throw Object.assign(new Error(`录制 ${record} 正在进行，请先 record stop 或 record abort`), { code: RPC_ERRORS.RUN_BUSY, data: { reason: "record" } });
@@ -103,8 +108,8 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
       catch (error) { await finishRecord("abort").catch(warnCatch("record start abort")); throw error; }
       finally { recordBusy = false; if (!liveRecordName()) await settleIdle(); }
     }
-    case "record.stop": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("stop"); } finally { recordBusy = false; await settleIdle(); } }
-    case "record.abort": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("abort"); } finally { recordBusy = false; await settleIdle(); } }
+    case "record.stop": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("stop"); } finally { recordBusy = false; await settleIdle(); await reconcileNow().catch(warnCatch("reconcile after record")); } }
+    case "record.abort": { if (recordBusy) throw new Error("record 操作进行中"); recordBusy = true; try { return await finishRecord("abort"); } finally { recordBusy = false; await settleIdle(); await reconcileNow().catch(warnCatch("reconcile after record")); } }
     default: throw Object.assign(new Error(`未知 method：${String(req.method)}`), { code: RPC_ERRORS.METHOD_NOT_FOUND });
   }
 }
@@ -191,9 +196,7 @@ function onRelay(sock: net.Socket): void {
           link.attach((out) => sock.write(frame(out)));
           helloDone = true;
           logger.info("extension connected");
-          reconciled = ensureChrome()
-            .then(() => context!.reconcile({ recordLive: liveRecordName() !== null, runActive: activeRunConn !== null }))
-            .catch(warnCatch("reconcile on hello"));
+          reconciled = ensureChrome().then(reconcileNow).catch(warnCatch("reconcile on hello"));
           return;
         }
         link.receive(msg);

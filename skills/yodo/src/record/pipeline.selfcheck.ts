@@ -104,7 +104,7 @@ const body = sanitizer.sanitizeBody(
   { token: "aaa.bbb.ccc", itemId: "123456789" },
   "request-body",
 );
-assert.match(headers.value.Authorization, /Bearer ⟨secret_001:jwt:/);
+assert.match(headers.value.Authorization, /^Bearer ⟨secret_001:jwt⟩$/);
 assert.match(String(body.value && (body.value as { token: string }).token), /secret_001/);
 assert.equal((body.value as { itemId: string }).itemId, "123456789");
 
@@ -146,6 +146,9 @@ const reqs = once.filter((e): e is RawRequest => "requestType" in e);
 assert.ok(reqs.every((r) => r.status === undefined || (r.status >= 200 && r.status < 300)));
 assert.ok(!reqs.some((r) => r.url.bareUrl.includes("hm.baidu.com")));
 assert.ok(once.every((e) => "requestType" in e));
+
+// 脱敏别名不带原值的长度
+assert.ok(!JSON.stringify(once).includes("bytes="), "别名不应泄漏密码长度");
 
 // runPipeline：结果与 processTimelinePipeline 一致；每一级的数量首尾相接，丢弃数与差值一致
 const { events: explained, stages } = runPipeline(raw, engine);

@@ -149,8 +149,8 @@
   document.addEventListener("input", (e) => {
     if (!e.isTrusted) return;
     const el = originOf(e);
-    // 复选框、单选框、按钮的 input 事件没有值的含义，它们的状态由 change 记录。
-    if (!el || (el instanceof HTMLInputElement && /^(checkbox|radio|file|button|submit|reset|image)$/.test(el.type))) return;
+    // 复选框、单选框、按钮的 input 事件没有值的含义；下拉框一次选择会连发 input 与 change。它们的状态都由 change 记录。
+    if (!el || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && /^(checkbox|radio|file|button|submit|reset|image)$/.test(el.type))) return;
     send({ kind: "fill", ...describe(el, false), ...fieldValue(el) });
   }, true);
 

@@ -4,6 +4,7 @@ import {
   CdpPage,
   RECORD_WINDOW_TITLE,
   RUN_WINDOW_TITLE,
+  closeTargetsKeepChrome,
   isChromeUiUrl,
   type RawCdpConnection,
 } from "./session.ts";
@@ -212,6 +213,31 @@ function fakeRaw(ops: TabOps, sent: Sent[], tabs?: Map<number, { title: string }
   await ctx.reconcile({ recordLive: false, runActive: true });
   assert.ok(!calls.includes(`closeTab:${running.targetId}`), "进行中的 run 的 tab 不被关闭");
   assert.equal(ctx.pages().some((p) => p.targetId === running.targetId), true, "进行中的 run 的页面记录保留");
+}
+
+// 7. JS 对话框：run 页面无人值守自动点"确定"；录制页面由用户自己选，holder 不处理
+{
+  const { ops, tabs } = fakeTabs();
+  const sent: Sent[] = [];
+  const { raw, emit } = fakeRaw(ops, sent, tabs);
+  const ctx = new CdpContext(raw);
+  const run = await ctx.newPage();
+  emit("Page.javascriptDialogOpening", {}, run.sessionId);
+  const rec = await ctx.openRecordWindow();
+  emit("Page.javascriptDialogOpening", {}, rec.page.sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const handled = (sessionId: string) => sent.some((s) => s.method === "Page.handleJavaScriptDialog" && s.sessionId === sessionId);
+  assert.equal(handled(run.sessionId), true, "run 页面的对话框自动处理");
+  assert.equal(handled(rec.page.sessionId), false, "录制页面的对话框交给用户，不自动点确定");
+}
+
+// 8. 关掉最后一个 yodo tab 时开的保活窗：标题与 run 窗锚点一致，之后对账和 run 会接管它，而不是永远留着空白窗
+{
+  const { ops, tabs } = fakeTabs();
+  const { raw } = fakeRaw(ops, [], tabs);
+  const only = await ops.openWindow({ focused: false });
+  await closeTargetsKeepChrome(raw, [String(only.tabId)]);
+  assert.deepEqual([...tabs.values()].map((t) => t.title), [RUN_WINDOW_TITLE]);
 }
 
 console.log("browser session selfcheck ok");

@@ -52,15 +52,17 @@ export class CdpPage {
   private inited = false;
   private offs: Array<() => void> = [];
 
+  /** autoDialog：JS 对话框（alert、confirm、prompt、beforeunload）自动点"确定"。run 页面无人值守才开；录制页面由用户自己选。 */
   constructor(
     raw: RawCdpConnection,
     targetId: string,
     sessionId: string,
+    autoDialog = false,
   ) {
     this.raw = raw;
     this.targetId = targetId;
     this.sessionId = sessionId;
-    this.initListeners();
+    if (autoDialog) this.initListeners();
   }
 
   private initListeners(): void {
@@ -181,7 +183,14 @@ export async function closeTargetsKeepChrome(
   }
   const leftover = pages.filter((t) => !closing.has(t.targetId));
   if (leftover.length === 0) {
-    await raw.ops.openWindow({ focused: false }).catch(() => {});
+    // 标题与 run 窗锚点一致：对账和下一次 run 会把它当作 run 窗，而不是永远关不掉的空白窗
+    const keep = await raw.ops.openWindow({ focused: false }).catch(() => null);
+    if (keep) {
+      await raw.ops.attach(keep.tabId)
+        .then(() => raw.send("Runtime.evaluate", { expression: `document.title = ${JSON.stringify(RUN_WINDOW_TITLE)}` }, String(keep.tabId)))
+        .then(() => raw.ops.detach(keep.tabId))
+        .catch(() => {});
+    }
   }
   await Promise.all(
     [...closing].map((targetId) => raw.ops.closeTab(Number(targetId)).catch(() => {})),
@@ -217,7 +226,7 @@ export class CdpContext {
   async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
     const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false, kind: "record" });
     try {
-      const page = await this.attachTarget(String(tabId));
+      const page = await this.attachTarget(String(tabId), false);
       await page.evaluate(`document.title = ${JSON.stringify(RECORD_WINDOW_TITLE)}`);
       return { page, windowId };
     } catch (err) {
@@ -234,7 +243,7 @@ export class CdpContext {
     }
     this.forgetRunMeta();
     const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false });
-    const anchor = await this.attachTarget(String(tabId));
+    const anchor = await this.attachTarget(String(tabId), true);
     await anchor.evaluate(`document.title = ${JSON.stringify(RUN_WINDOW_TITLE)}`);
     this.runWindowId = windowId;
     this.runAnchorId = anchor.targetId;
@@ -300,7 +309,7 @@ export class CdpContext {
     const windowId = await this.ensureRunWindow();
     const { tabId } = await this.raw.ops.openTab({ windowId, url: "about:blank", active: true });
     this.runTabId = String(tabId);
-    return await this.attachTarget(String(tabId));
+    return await this.attachTarget(String(tabId), true);
   }
 
   /** run 结束：关闭本次 run 的 tab；锚点保留。 */
@@ -362,11 +371,11 @@ export class CdpContext {
     }
   }
 
-  private async attachTarget(targetId: string): Promise<CdpPage> {
+  private async attachTarget(targetId: string, autoDialog: boolean): Promise<CdpPage> {
     const existing = this.pagesMap.get(targetId);
     if (existing && !existing.isClosed()) return existing;
     await this.raw.ops.attach(Number(targetId));
-    const page = new CdpPage(this.raw, targetId, targetId);
+    const page = new CdpPage(this.raw, targetId, targetId, autoDialog);
     this.pagesMap.set(targetId, page);
     await page.initPage();
     return page;

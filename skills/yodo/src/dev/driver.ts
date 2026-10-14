@@ -2,6 +2,7 @@
  * dev Driver：像用户一样操作 yodo 的页面（主要是录制窗口）。设计与约束见 AGENTS.md 2.3。
  * 录制器只认 isTrusted 的 click / input / change，所以输入全部走 CDP 的 Input.*。
  * 只用 Input.*、只读的 Runtime.evaluate、Page.navigate；不调用任何 *.disable，也不用 scrollIntoView（会产生被录制的 scroll）。
+ * 会弹 JS 对话框的点击，Input.dispatchMouseEvent 要等对话框处理完才返回：不要 await click，先用 Page.handleJavaScriptDialog 处理。
  * 不需要等"录制脚本就绪"：它注入在隔离 world 里（页面看不到），但在页面脚本之前就执行，goto 等到文档加载完时早已就绪。
  */
 import { sessionRpc } from "../cli/rpc.ts";
@@ -73,8 +74,18 @@ export class DevPage {
         await this.cdp("Input.insertText", { text: ch });
       }
     }
-    await this.cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
-    await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await this.press("Tab");
+  }
+
+  /**
+   * 按一个键：Tab / Enter / ArrowDown / ArrowUp，或单个字符。
+   * 收起的 <select> 在 macOS 上不响应方向键，要用字符键（输入即选中）改值。
+   */
+  async press(key: "Tab" | "Enter" | "ArrowDown" | "ArrowUp" | (string & {})): Promise<void> {
+    const named = ({ Tab: 9, Enter: 13, ArrowDown: 40, ArrowUp: 38 } as Record<string, number>)[key];
+    const down = named ? { type: "keyDown", key, code: key, windowsVirtualKeyCode: named } : { type: "keyDown", key, text: key };
+    await this.cdp("Input.dispatchKeyEvent", down);
+    await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key, ...(named ? { code: key, windowsVirtualKeyCode: named } : {}) });
   }
 
   /** 滚轮滚动。位移要不小于 20px，并等录制器的 250ms 去抖。 */

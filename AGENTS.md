@@ -58,7 +58,7 @@ npm run verify:pack
 **用法**：
 
 - 开关是标记文件：`touch ~/.yodo/session/dev` 开启，`rm ~/.yodo/session/dev` 关闭。holder 每次收到 `dev.*` 请求时检查，不需要重启。
-- `dev.pages`：列出 yodo 的页面（pageId、windowId、url、标题）。`record.start` 之后，录制页的标题是 `yodo record`。
+- `dev.pages`：列出扩展纳入的全部 tab（pageId、windowId、url、标题）。`record.start` 之后，录制页的标题是 `yodo record`。`record.start` 之后，录制页的标题是 `yodo record`。
 - `dev.cdp { pageId, method, params }`：对该页面发 CDP，包括录制窗口。拒绝 `*.disable`、`Target.*`、`Browser.*`。生产环境的 `cdp.send` 仍然只能在 run 中使用。
 - 脚本通过现有的 `sessionRpc` 调用这些 method。`skills/yodo/src/dev/driver.ts` 的 `DevPage` 用 `Input.*` 模拟用户操作（`goto`、`click`、`type`、`scroll`、`waitFor`）。录制器只认 `isTrusted` 的事件，所以不能用 task-lib 的 `click`、`fill`。
 - 流水线：`runPipeline()` 返回每一级的输入数、输出数和丢弃原因；录制结束时写一行 `pipeline N → M` 日志，`data.stages` 里是各级明细。
@@ -176,7 +176,7 @@ ping
 - run 窗：holder 记录 `runWindowId`，窗口与一个锚点 tab（`about:blank`，标题 `yodo run`）同时存在。锚点 tab 保留，保证窗口存活。
 - 每次 run 新开一个 tab，结束时 detach 并关闭它。不复用 tab。
 - run 窗被用户关闭后，下次 run 静默重建。holder 退出时关闭 run 窗。
-- 对账：扩展每次 `hello` 之后，holder 调用 `listOwned`，先丢弃 debugger 附加状态未知的页面记录，再按标题（`yodo run`、`yodo record`）识别 yodo 的窗口：当前 `runWindowId` 的窗口保留，只关掉其中除锚点外的残留 tab；其它 `yodo run` 窗口是孤儿，整扇关闭；录制进行中不关 `yodo record` 窗口。只关被标题确认的窗口，从不按 id 关闭用户的窗口。
+- 对账：扩展每次 `hello` 之后，holder 调用 `listOwned`，先丢弃 debugger 附加状态未知的页面记录，再按标题（`yodo run`、`yodo record`）识别 yodo 的窗口：当前 `runWindowId` 的窗口保留，只关掉其中除锚点外的残留 tab；其它 `yodo run` 窗口是孤儿，整扇关闭；录制进行中不关 `yodo record` 窗口。只关被标题确认的窗口，从不按 id 关闭用户的窗口。录制 stop / abort 结束后也对账一次。
 - 所有权登记同时写入 `chrome.storage.session`（service worker 重启后可信，扩展刷新会清空）和 `chrome.storage.local`（扩展刷新后仍在，但 tab id 在浏览器重启后会被复用）。恢复 `local` 里的登记时，只接受仍然存在、且窗口里有标题为 `yodo run` 或 `yodo record` 的 tab 的窗口，其余丢弃。`listOwned` 返回每个 tab 的 `title`，holder 对账靠它识别 yodo 的窗口。
 
 ### 4.5 录制
@@ -191,7 +191,7 @@ ping
 - 脱敏保留；adblock 过滤保留。
 - 网络采集分两层：`record/collect.ts` 的采集端只做 attach 和所有 I/O（开启域、取响应体、读页面 HTML），事件交给 `record/requests.ts` 的 `RequestAssembler` 拼成请求记录。拼装器不做任何 I/O，只有一个入口 `feed(事件)`；需要取响应体或补抓主文档时返回一个动作，采集端执行后再把结果作为 `yodo.body`、`yodo.snapshot` 事件喂回去。设置 `YODO_RECORD_LOG=<路径>` 时，stop 时把喂给拼装器的全部事件写成 JSON（含未脱敏的数据，默认不记录），可直接作为测试夹具，放进 `record/fixtures/` 即可回放。
 - 补抓的主文档（`late: true`）：页面在开始采集之前就已经加载完时，读取当前页面的 HTML 补一条主文档。`dropIncompleteRequests` 不会删除它。
-- 录制期间不处理 JS 对话框（`alert`、`confirm`、`prompt`、`beforeunload`），由用户在页面里自己选，不自动点「确定」。
+- 录制期间不处理 JS 对话框（`alert`、`confirm`、`prompt`、`beforeunload`），由用户在页面里自己选，不自动点「确定」；只有无人值守的 run 页面才自动点「确定」（`CdpPage` 的 `autoDialog`）。
 - 录制窗口里用户自己新开的 tab 会被纳入：扩展纳入后宿主按窗口规则 attach。新标签页是 `chrome://` 页面，无法 attach；用户在里面首次导航后才 attach，第一次文档请求可能记成补抓的主文档（`late: true`）。
 - `record stop` 输出 `status`、`name`、`recordDir`、`timeline`；有页面的动作没录到时多一个 `warnings` 数组。
 
