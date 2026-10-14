@@ -1,3 +1,5 @@
+> 注：本文中关于可信输入（isTrusted、Input.*）的决定已被 plan/record-untrusted-and-dom-driver.md 取代。
+
 # dev：本地开发验证工具
 
 ## 约束（先于一切）

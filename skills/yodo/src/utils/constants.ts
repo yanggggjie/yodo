@@ -37,8 +37,8 @@ export const TASK_TIMEOUT_MS = 90_000;
 /** run.begin 遇到另一个 task 正在运行时，自动等待并重试的最长时间。 */
 export const RUN_BUSY_WAIT_MS = 30_000;
 export const RECORD_STOP_RPC_MS = 60_000;
-/** 录制最长 5 分钟，到点按 stop 归档。 */
-export const RECORD_MAX_MS = 5 * 60 * 1000;
+/** 录制最长 10 分钟，到点按 stop 归档。 */
+export const RECORD_MAX_MS = 10 * 60 * 1000;
 export const SESSION_LOG_MAX_BYTES = 20 * 1024 * 1024;
 export const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB
 /** 响应体超过此值拆到 *.response.json / *.response.html */

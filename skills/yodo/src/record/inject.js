@@ -1,5 +1,5 @@
 /**
- * 注入录制页面的采集脚本：监听可信的 click、input、change、scroll，经 __yodoEvent binding 回传。
+ * 注入录制页面的采集脚本：监听 click、input、change、scroll，经 __yodoEvent binding 回传。
  * 每个事件直接带上 agent 写 DOM task 需要的字段：selector（尽量稳定且唯一）、role、name、输入值、滚动量。
  * 由 collect.ts 读取后交给 Page.addScriptToEvaluateOnNewDocument（以及已加载的文档）执行，运行在页面里，不能 import。
  */
@@ -137,7 +137,6 @@
   const describe = (el, direct) => ({ role: roleOf(el), name: nameOf(el, direct), selector: selectorOf(lightHost(el)) });
 
   document.addEventListener("click", (e) => {
-    if (!e.isTrusted) return;
     const origin = originOf(e);
     if (!origin) return;
     // 点到按钮里的图标或文字，算作点了按钮；点到 label，算作点了它控制的输入框（浏览器随后会再对输入框发一次 click）。
@@ -147,7 +146,6 @@
   }, true);
 
   document.addEventListener("input", (e) => {
-    if (!e.isTrusted) return;
     const el = originOf(e);
     // 复选框、单选框、按钮的 input 事件没有值的含义；下拉框一次选择会连发 input 与 change。它们的状态都由 change 记录。
     if (!el || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && /^(checkbox|radio|file|button|submit|reset|image)$/.test(el.type))) return;
@@ -155,7 +153,6 @@
   }, true);
 
   document.addEventListener("change", (e) => {
-    if (!e.isTrusted) return;
     const el = originOf(e);
     if (!el) return;
     const toggle = el instanceof HTMLInputElement && /^(checkbox|radio)$/.test(el.type);

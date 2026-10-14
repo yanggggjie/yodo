@@ -1,8 +1,8 @@
 import { evaluate, STEP_TIMEOUT_MS } from "./page.js";
 import { callOn, describeTarget, locate, withElement } from "./locate.js";
 
-// ponytail: events from these helpers are untrusted and carry no pointer coordinates.
-// Sliders, clientX menus, and editor-owned documents need a task-level evaluate. Do not switch these back to Input.*.
+// ponytail: these helpers dispatch DOM events directly (no pointer coordinates).
+// Sliders, clientX menus, and editor-owned documents need a task-level evaluate.
 // target 是 CSS 选择器字符串，或 { role, name }。两者都会等元素可见、可操作（timeout 毫秒，默认 10 秒）。
 
 export async function click(page, target, options) {

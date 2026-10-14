@@ -1,3 +1,5 @@
+> 注：本文中关于可信输入（isTrusted、Input.*）的决定已被 plan/record-untrusted-and-dom-driver.md 取代。
+
 # DOM 录制：让采集的东西真正交给 agent
 
 ## 问题（用 `~/.yodo/record` 里的真实录制核对过）

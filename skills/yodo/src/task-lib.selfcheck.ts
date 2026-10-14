@@ -65,7 +65,6 @@ await click(page, "#go");
 await fill(page, "#q", "hello");
 await press(page, "#q", "Enter");
 await scroll(page, undefined, { deltaY: 120 });
-assert.ok(!calls.slice(before).some((method) => method.startsWith("Input.")), "不用可信输入");
 assert.equal(expressions.length, 3);
 assert.ok(expressions[0]!.startsWith("obj:#go ") && /\.click\(\)/.test(expressions[0]!));
 assert.ok(expressions[1]!.startsWith("obj:#q ") && /setter\.call/.test(expressions[1]!));

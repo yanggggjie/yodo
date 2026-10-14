@@ -261,7 +261,7 @@ const pause = () => new Promise((r) => setTimeout(r, 20));
   await rec.stop();
 }
 
-// 9. 真实 Chrome 里用可信鼠标、键盘输入抓到的页面脚本事件，经 startInjectEvents 和时间线规则整理
+// 9. 真实 Chrome 里用页面操作抓到的页面脚本事件，经 startInjectEvents 和时间线规则整理
 {
   const fx = loadDomFixture();
   const route = fx.navigatedWithinDocument[1]!.url;

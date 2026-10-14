@@ -60,7 +60,7 @@ npm run verify:pack
 - 开关是标记文件：`touch ~/.yodo/session/dev` 开启，`rm ~/.yodo/session/dev` 关闭。holder 每次收到 `dev.*` 请求时检查，不需要重启。
 - `dev.pages`：列出扩展纳入的全部 tab（pageId、windowId、url、标题）。`record.start` 之后，录制页的标题是 `yodo record`。`record.start` 之后，录制页的标题是 `yodo record`。
 - `dev.cdp { pageId, method, params }`：对该页面发 CDP，包括录制窗口。拒绝 `*.disable`、`Target.*`、`Browser.*`。生产环境的 `cdp.send` 仍然只能在 run 中使用。
-- 脚本通过现有的 `sessionRpc` 调用这些 method。`skills/yodo/src/dev/driver.ts` 的 `DevPage` 用 `Input.*` 模拟用户操作（`goto`、`click`、`type`、`scroll`、`waitFor`）。录制器只认 `isTrusted` 的事件，所以不能用 task-lib 的 `click`、`fill`。
+- 脚本通过现有的 `sessionRpc` 调用这些 method。`skills/yodo/src/dev/driver.ts` 的 `DevPage` 全部是页面内的 DOM 操作（`goto` 用 `Page.navigate`，`click`、`type`、`press`、`scroll` 用页面脚本），不使用 `Input.*`。录制器不区分事件是否由用户触发，驱动、task-lib 与真人操作都会被录到。
 - 流水线：`runPipeline()` 返回每一级的输入数、输出数和丢弃原因；录制结束时写一行 `pipeline N → M` 日志，`data.stages` 里是各级明细。
 
 ```bash
@@ -192,7 +192,7 @@ ping
 - 页面脚本（`record/inject.js`）在页面里直接产出 timeline 需要的字段：`selector`（候选依次为稳定的 `id`、`data-testid` 等、`name`、`aria-label`、`placeholder`、稳定的 class，要求在文档里唯一；都不唯一时用 `:nth-of-type` 拼路径）、`role`、`name`（`aria-labelledby` → `aria-label` → `<label>` → `placeholder` → 自己的文字，最长 80 字符；没有可交互元素的点击只取元素自己的文字）、输入值、滚动量。点到按钮里的图标算点了按钮，点 `<label>` 算点了它控制的输入框。宿主不再采集元素的祖先、子节点等整份描述；判断是不是同一控件只比较 `selector`。
 - 脚本的注入：`Page.addScriptToEvaluateOnNewDocument` 只对之后新建的文档生效，所以 attach 时还要对已存在的 frame（含 iframe）用 `Page.createIsolatedWorld` + `Runtime.evaluate` 立刻补注入，否则晚 attach 的页面（尤其单页应用）整页录不到动作。脚本加载后发 `ready`；stop 时有网络请求却没收到 `ready` 的页面，进入 `record stop` 的 `warnings`。
 - 单页应用的路由变化（`Page.navigatedWithinDocument`）记为 `navigation`；iframe 里的导航不记录。
-- 验证：`record/fixtures/dom-events.json` 是在真实 Chrome 里用可信的鼠标、键盘输入抓到的页面事件，其中的 `ax` 是同一页面上 Chrome 无障碍树给出的 role 和 name，`collect.selfcheck.ts` 逐个对照。
+- 验证：`record/fixtures/dom-events.json` 是在真实 Chrome 里在真实 Chrome 里通过页面操作抓到的页面事件，其中的 `ax` 是同一页面上 Chrome 无障碍树给出的 role 和 name，`collect.selfcheck.ts` 逐个对照。
 - 脱敏保留；adblock 过滤保留。
 - 网络采集分两层：`record/collect.ts` 的采集端只做 attach 和所有 I/O（开启域、取响应体、读页面 HTML），事件交给 `record/requests.ts` 的 `RequestAssembler` 拼成请求记录。拼装器不做任何 I/O，只有一个入口 `feed(事件)`；需要取响应体或补抓主文档时返回一个动作，采集端执行后再把结果作为 `yodo.body`、`yodo.snapshot` 事件喂回去。设置 `YODO_RECORD_LOG=<路径>` 时，stop 时把喂给拼装器的全部事件写成 JSON（含未脱敏的数据，默认不记录），可直接作为测试夹具，放进 `record/fixtures/` 即可回放。
 - 补抓的主文档（`late: true`）：页面在开始采集之前就已经加载完时，读取当前页面的 HTML 补一条主文档。`dropIncompleteRequests` 不会删除它。

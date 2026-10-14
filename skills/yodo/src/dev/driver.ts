@@ -1,15 +1,22 @@
 /**
- * dev Driver：像用户一样操作 yodo 的页面（主要是录制窗口）。设计与约束见 AGENTS.md 2.3。
- * 录制器只认 isTrusted 的 click / input / change，所以输入全部走 CDP 的 Input.*。
- * 只用 Input.*、只读的 Runtime.evaluate、Page.navigate；不调用任何 *.disable，也不用 scrollIntoView（会产生被录制的 scroll）。
- * 会弹 JS 对话框的点击，Input.dispatchMouseEvent 要等对话框处理完才返回：不要 await click，先用 Page.handleJavaScriptDialog 处理。
- * 不需要等"录制脚本就绪"：它注入在隔离 world 里（页面看不到），但在页面脚本之前就执行，goto 等到文档加载完时早已就绪。
+ * dev Driver：在录制窗口里模拟用户操作。设计与约束见 plan/record-untrusted-and-dom-driver.md。
+ * 全部是页面内的 DOM 操作（Runtime.evaluate），不使用 Input 域；录制器记录所有页面事件，不做区分。
+ * 只用 Runtime.evaluate、Page.navigate、Page.handleJavaScriptDialog；不调用任何 *.disable。
+ * 阻塞式对话框（confirm、alert）会让 evaluate 挂起：驱动在操作期间按 dialog 策略处理它。
  */
 import { sessionRpc } from "../cli/rpc.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-type Point = { x: number; y: number };
+export type DialogPolicy = "accept" | "dismiss";
+
+const NAMED_KEYS: Record<string, { code: string; keyCode: number }> = {
+  Enter: { code: "Enter", keyCode: 13 },
+  Tab: { code: "Tab", keyCode: 9 },
+  Escape: { code: "Escape", keyCode: 27 },
+  ArrowUp: { code: "ArrowUp", keyCode: 38 },
+  ArrowDown: { code: "ArrowDown", keyCode: 40 },
+};
 
 export class DevPage {
   readonly pageId: string;
@@ -43,54 +50,104 @@ export class DevPage {
     else await this.waitFor(`location.href !== ${JSON.stringify(before)} && document.readyState === 'complete'`, `加载 ${url}`);
   }
 
-  private async center(selector: string): Promise<Point> {
-    const p = await this.eval<Point | "missing" | "offscreen">(`(() => {
+  /**
+   * 执行一段页面脚本（返回字符串状态）。若页面弹出对话框，evaluate 会挂起，
+   * 这里在等待期间按 dialog 策略处理它，然后取回结果。
+   */
+  private async act(expression: string, dialog: DialogPolicy): Promise<string> {
+    let settled = false;
+    const pending = this.eval<string>(expression).finally(() => { settled = true; });
+    for (let waited = 0; !settled && waited < 40; waited++) {
+      await sleep(100);
+      if (waited >= 2) await this.cdp("Page.handleJavaScriptDialog", { accept: dialog === "accept" }).catch(() => {});
+    }
+    return pending;
+  }
+
+  private static check(result: string, selector: string): void {
+    if (result === "missing") throw new Error(`找不到元素：${selector}`);
+    if (result === "not-editable") throw new Error(`元素不可输入：${selector}`);
+    if (result === "not-select") throw new Error(`元素不是下拉框：${selector}`);
+  }
+
+  /** 滚到元素中间，然后调用 click()。 */
+  async click(selector: string, options: { dialog?: DialogPolicy } = {}): Promise<void> {
+    const result = await this.act(`(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return "missing";
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return "offscreen";
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    })()`);
-    if (p === "missing") throw new Error(`找不到元素：${selector}`);
-    if (p === "offscreen") throw new Error(`元素不在视口内，先 scroll：${selector}`);
-    return p;
+      el.scrollIntoView({ block: "center", inline: "center" });
+      el.click();
+      return "ok";
+    })()`, options.dialog ?? "accept");
+    DevPage.check(result, selector);
   }
 
-  async click(selector: string): Promise<void> {
-    const { x, y } = await this.center(selector);
-    await this.cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-    await this.cdp("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-    await this.cdp("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-  }
-
-  /** 点击聚焦后逐字输入；最后按 Tab 失焦，输入框的 change 才会触发。 */
-  async type(selector: string, text: string): Promise<void> {
-    await this.click(selector);
-    for (const ch of text) {
-      if (ch.charCodeAt(0) < 128) {
-        await this.cdp("Input.dispatchKeyEvent", { type: "keyDown", text: ch, key: ch });
-        await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
-      } else {
-        await this.cdp("Input.insertText", { text: ch });
+  /** 聚焦后逐字符输入（每个字符一个 input 事件），最后派发 change。 */
+  async type(selector: string, text: string, options: { dialog?: DialogPolicy } = {}): Promise<void> {
+    const result = await this.act(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return "missing";
+      el.scrollIntoView({ block: "center", inline: "center" });
+      el.focus();
+      const isText = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (!isText && !el.isContentEditable) return "not-editable";
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = isText ? Object.getOwnPropertyDescriptor(proto, "value")?.set : null;
+      for (const ch of ${JSON.stringify(text)}) {
+        if (setter) setter.call(el, el.value + ch);
+        else el.innerText = el.innerText + ch;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
       }
-    }
-    await this.press("Tab");
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return "ok";
+    })()`, options.dialog ?? "accept");
+    DevPage.check(result, selector);
   }
 
   /**
-   * 按一个键：Tab / Enter / ArrowDown / ArrowUp，或单个字符。
-   * 收起的 <select> 在 macOS 上不响应方向键，要用字符键（输入即选中）改值。
+   * 按一个键，作用于当前焦点元素。
+   * - 命名键（Enter、Tab、Escape、方向键）派发 keydown / keyup；Enter 在输入框所在表单上 requestSubmit()，Tab 让焦点离开当前元素。
+   * - 收起的 <select> 上按方向键：改为下一个 / 上一个选项并派发 change（合成键盘事件不会改下拉框）。
+   * - 单个字符：追加到当前文本框。
    */
-  async press(key: "Tab" | "Enter" | "ArrowDown" | "ArrowUp" | (string & {})): Promise<void> {
-    const named = ({ Tab: 9, Enter: 13, ArrowDown: 40, ArrowUp: 38 } as Record<string, number>)[key];
-    const down = named ? { type: "keyDown", key, code: key, windowsVirtualKeyCode: named } : { type: "keyDown", key, text: key };
-    await this.cdp("Input.dispatchKeyEvent", down);
-    await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key, ...(named ? { code: key, windowsVirtualKeyCode: named } : {}) });
+  async press(key: string, options: { dialog?: DialogPolicy } = {}): Promise<void> {
+    const named = NAMED_KEYS[key];
+    const result = await this.act(`(() => {
+      const el = document.activeElement ?? document.body;
+      const named = ${JSON.stringify(named ?? null)};
+      const key = ${JSON.stringify(key)};
+      if (!named) {
+        if (key.length !== 1) return "unsupported-key";
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, "value").set.call(el, el.value + key);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        return "ok";
+      }
+      const init = { key, code: named.code, keyCode: named.keyCode, bubbles: true, cancelable: true };
+      if (el instanceof HTMLSelectElement && (key === "ArrowDown" || key === "ArrowUp")) {
+        el.selectedIndex = Math.max(0, Math.min(el.options.length - 1, el.selectedIndex + (key === "ArrowDown" ? 1 : -1)));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return "ok";
+      }
+      const proceed = el.dispatchEvent(new KeyboardEvent("keydown", init));
+      el.dispatchEvent(new KeyboardEvent("keyup", init));
+      if (proceed && key === "Enter" && el.form) el.form.requestSubmit();
+      if (proceed && key === "Tab") el.blur();
+      return "ok";
+    })()`, options.dialog ?? "accept");
+    if (result === "unsupported-key") throw new Error(`不支持的按键：${key}`);
   }
 
-  /** 滚轮滚动。位移要不小于 20px，并等录制器的 250ms 去抖。 */
-  async scroll(deltaY: number): Promise<void> {
-    await this.cdp("Input.dispatchMouseEvent", { type: "mouseWheel", x: 200, y: 200, deltaX: 0, deltaY });
+  /** 滚动页面（或指定容器）。位移要不小于 20px，并等录制器的 250ms 去抖。 */
+  async scroll(deltaY: number, selector?: string): Promise<void> {
+    await this.eval(`(() => {
+      const el = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.scrollingElement"};
+      if (!el) return "missing";
+      el.scrollBy({ top: ${deltaY}, behavior: "instant" });
+      return "ok";
+    })()`);
     await sleep(400);
   }
 }

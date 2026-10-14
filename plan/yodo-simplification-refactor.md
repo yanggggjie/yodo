@@ -1,3 +1,5 @@
+> 注：本文中关于可信输入（isTrusted、Input.*）的决定已被 plan/record-untrusted-and-dom-driver.md 取代。
+
 # yodo 重构方案（简化版）
 
 ## 目标

@@ -1,5 +1,5 @@
 {
- "description": "本地控件页面在真实 Chrome 里用可信鼠标、键盘输入驱动时，注入脚本回传的 binding 载荷（含 iframe、shadow DOM、复选框 label、密码框、容器滚动、整页滚动、晚注入），以及页面内路由变化事件",
+ "description": "本地控件页面在真实 Chrome 里在真实 Chrome 里通过页面操作驱动时，注入脚本回传的 binding 载荷（含 iframe、shadow DOM、复选框 label、密码框、容器滚动、整页滚动、晚注入），以及页面内路由变化事件",
  "tabId": "301",
  "payloads": [
   {
