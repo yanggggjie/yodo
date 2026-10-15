@@ -35,6 +35,7 @@ globalThis.chrome = {
     onStartup: onEvt("startup"),
     onInstalled: onEvt("installed"),
   },
+  action: { onClicked: onEvt("actionClicked") },
   alarms: { create: (n, o) => calls.push(["alarm", n, o.periodInMinutes]), onAlarm: onEvt("alarm") },
   debugger: {
     attach: async (t, v) => { calls.push(["attach", t.tabId, v]); },
@@ -175,5 +176,11 @@ assert.ok(posted.some((m) => m.type === "tab" && m.kind === "removed" && m.tabId
 portListeners.disconnect();
 await new Promise((r) => setTimeout(r, 1100));
 assert.equal(calls.filter((c) => c[0] === "connectNative").length >= 2, true, "断开后应重连");
+
+// 9. 点击工具栏图标：立即重连，不等退避（need-extension 的提示让用户点一下它）
+const connectsBefore = calls.filter((c) => c[0] === "connectNative").length;
+portListeners.disconnect();
+listeners.actionClicked();
+assert.equal(calls.filter((c) => c[0] === "connectNative").length, connectsBefore + 1, "点击图标应立即重连");
 
 console.log("extension smoke ok");

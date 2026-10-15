@@ -268,5 +268,7 @@ chrome.runtime.onInstalled.addListener(connect);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "yodo-keepalive" && !port) connect();
 });
+// 点击工具栏图标：唤醒 service worker 并立即尝试连接（need-extension 的提示让用户点一下它）。
+chrome.action.onClicked.addListener(connect);
 chrome.alarms.create("yodo-keepalive", { periodInMinutes: KEEPALIVE_MINUTES });
 connect();

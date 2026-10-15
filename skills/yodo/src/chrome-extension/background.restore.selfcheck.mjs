@@ -32,6 +32,7 @@ globalThis.chrome = {
     onStartup: onEvt(),
     onInstalled: onEvt(),
   },
+  action: { onClicked: onEvt() },
   alarms: { create: () => {}, onAlarm: onEvt() },
   debugger: { attach: async () => {}, detach: async () => {}, sendCommand: async () => ({}), onEvent: onEvt(), onDetach: onEvt() },
   windows: {

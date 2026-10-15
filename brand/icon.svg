@@ -1,0 +1,19 @@
+<!-- yodo 图标：整个图标面就是一个 y。由 brand/icon.py 生成，不要手改；设计说明见 brand/icon.md。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <!-- 三块区域各一条渐变：上方（两臂之间）暖橙到玫红，左侧靛紫，右下金黄到橙 -->
+    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="30" y1="0" x2="110" y2="60"><stop offset="0" stop-color="#FF8A5B"/><stop offset="1" stop-color="#FF3D6E"/></linearGradient>
+    <linearGradient id="left" gradientUnits="userSpaceOnUse" x1="0" y1="10" x2="60" y2="115"><stop offset="0" stop-color="#24166B"/><stop offset="1" stop-color="#6C3BE0"/></linearGradient>
+    <linearGradient id="right" gradientUnits="userSpaceOnUse" x1="130" y1="40" x2="50" y2="130"><stop offset="0" stop-color="#FFC857"/><stop offset="1" stop-color="#FF8A3D"/></linearGradient>
+    <clipPath id="tile"><rect width="128" height="128" rx="30"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- 底色即上方区域；左侧、右下两块盖在上面 -->
+    <rect width="128" height="128" fill="url(#top)"/>
+    <path d="M-12 -12 C22 2 56 36 70 84 C58 104 46 124 -12 122 L-12 -12 Z" fill="url(#left)"/>
+    <path d="M140 -14 L150 -14 L150 150 L-12 150 L-12 122 C46 124 58 104 70 84 C96 48 118 14 140 -14 Z" fill="url(#right)"/>
+    <!-- 两条白线画出 y：短臂（左上到相接点）和长斜线（右上经相接点，尾巴向左弯出左边缘） -->
+    <path d="M-12 -12 C22 2 56 36 70 84" stroke="#fff" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <path d="M140 -14 C118 14 96 48 70 84 C58 104 46 124 -12 122" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
