@@ -95,6 +95,7 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 - 命令统一为 `yodo`（`run`、`eval`、`record`、`daemon`、`doctor`）；task 参数改为具名，`yodo run <task> --参数 值`。
 - 运行更稳定：单步和整体超时、并发时自动等待、失败信息与退出码统一，并保存运行历史；`yodo eval` 可顺序组合多个 task。
 - 安装与升级更简单：自动检测并替换过期的后台进程，`doctor` 能报告版本是否一致。
+- 扩展有了图标；点击工具栏上的 yodo 图标，可以立即重新连接。
 - **不兼容**：v1 学会的、带参数的 task 需要改成具名参数（`@param 名字` 与 `yodo.params.名字`）才能继续使用；`~/.yodo/temp` 和 `@executor` 取消。
 
 #### v1.2.0
