@@ -1,0 +1,10 @@
+{
+  "id": "xhs-search-top-liked-note",
+  "site": "https://www.xiaohongshu.com",
+  "intent": "搜索 {query}，把结果按「最新」排序，打开点赞数最高的那篇笔记，读出作者名和点赞数",
+  "params": {
+    "demo": { "query": "咖啡" },
+    "test": [{ "query": "露营" }, { "query": "手冲" }]
+  },
+  "check": "读出的作者名非空；点赞数是数字；打开的是搜索结果里的笔记页而非首页或搜索页"
+}

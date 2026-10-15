@@ -8,4 +8,4 @@ export function expectRequest(
   match: { method: string; path: string },
   action: () => Promise<unknown> | unknown,
   options?: { timeout?: number },
-): Promise<{ status: number | undefined; body: { body: string; base64Encoded: boolean } }>;
+): Promise<{ status: number | undefined; body: string }>;

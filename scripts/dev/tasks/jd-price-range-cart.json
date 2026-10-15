@@ -1,0 +1,13 @@
+{
+  "id": "jd-price-range-cart",
+  "site": "https://www.jd.com",
+  "intent": "搜索 {query}，把结果按价格从低到高排序，把价格落在 {min} 到 {max} 元之间的第 1 个结果加入购物车，读出购物车总价",
+  "params": {
+    "demo": { "query": "机械键盘", "min": "100", "max": "300" },
+    "test": [
+      { "query": "蓝牙耳机", "min": "50", "max": "150" },
+      { "query": "运动鞋", "min": "200", "max": "400" }
+    ]
+  },
+  "check": "购物车总价是数字；新加入商品的价格落在 {min} 到 {max} 区间内"
+}

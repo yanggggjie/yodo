@@ -8,7 +8,11 @@ const expressions: string[] = [];
 const listeners = new Map<string, (value: unknown) => void>();
 // 假页面：CSS 选择器 "#missing" 找不到，其它都找得到；无障碍树里 button "保存" 唯一，"重复" 有两个，"隐藏" 不存在。
 // visibleAfter 控制元素要过几次检查才可见，用来测自动等待。
-const ax: Record<string, number> = { "button|保存": 1, "button|重复": 2 };
+// locate() 现在自己按 role 取回全部节点再按名称过滤（不再让 CDP 按 accessibleName 精确匹配），
+// 所以这里按 role 分组，每个节点带 name.value，和真实 Accessibility.queryAXTree 的返回形状一致。
+const ax: Record<string, { name: string; count: number }[]> = {
+  button: [{ name: "保存", count: 1 }, { name: "重复", count: 2 }],
+};
 let visibleAfter = 0;
 let checks = 0;
 const page = { cdp: {
@@ -35,9 +39,9 @@ const page = { cdp: {
       return { result: { value: undefined } };
     }
     if (method === "Accessibility.queryAXTree") {
-      const key = `${params.role}|${params.accessibleName}`;
-      const count = ax[key] ?? 0;
-      return { nodes: Array.from({ length: count }, (_, i) => ({ ignored: false, backendDOMNodeId: 100 + i })) };
+      const entries = ax[params.role] ?? [];
+      const nodes = entries.flatMap((entry) => Array.from({ length: entry.count }, () => ({ ignored: false, backendDOMNodeId: 100, name: { value: entry.name } })));
+      return { nodes: nodes.map((node, i) => ({ ...node, backendDOMNodeId: 100 + i })) };
     }
     if (method === "DOM.resolveNode") return { object: { objectId: `ax:${params.backendNodeId}` } };
     if (method === "Page.navigate") {
@@ -60,7 +64,7 @@ await goto(page, "https://example.com");
 assert.deepEqual(calls, ["Runtime.evaluate", "Page.enable", "Page.navigate"], "evaluate 不需要 Runtime.enable");
 assert.equal(listeners.size, 0);
 
-const before = calls.length;
+
 await click(page, "#go");
 await fill(page, "#q", "hello");
 await press(page, "#q", "Enter");
@@ -81,6 +85,13 @@ await assert.rejects(click(page, { role: "button", name: "重复" }, { timeout: 
 // 找不到：等满超时，报出在等什么
 await assert.rejects(click(page, { role: "button", name: "不存在" }, { timeout: 300 }), /button "不存在"：等了 300 毫秒，没有找到/);
 await assert.rejects(click(page, "#missing", { timeout: 300 }), /等了 300 毫秒，没有找到/);
+
+// 名称空白规范化：站点给的名称是 "保存 "（末尾带空格），查找用的名称不带，仍应匹配（问题 C3）
+ax.button = [{ name: "保存 ", count: 1 }];
+expressions.length = 0;
+await click(page, { role: "button", name: "保存" });
+assert.equal(expressions[0]!.startsWith("ax:100 "), true, "名称末尾的空白被规范化后仍能匹配");
+ax.button = [{ name: "保存", count: 1 }, { name: "重复", count: 2 }];
 
 // 自动等待：元素过两次检查才可见，动作会等到它可见再执行，而不是立即失败
 checks = 0; visibleAfter = 2; expressions.length = 0;

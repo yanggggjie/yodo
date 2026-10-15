@@ -34,9 +34,13 @@ async function findOnce(page, target) {
     return response.result.subtype === "null" ? null : response.result.objectId ?? null;
   }
   // queryAXTree 必须指定查询的根：这里用 document 对象，查整棵文档的无障碍树
+  // 不把 name 交给 CDP 的 accessibleName 做精确匹配：有的站点无障碍名称带多余空白（如 "Following "），
+  // CDP 按字节精确比较会找不到。改为自己按 role 取回全部节点，再规范化空白后比较。
   const document = await page.cdp.send("Runtime.evaluate", { expression: "document", returnByValue: false });
-  const { nodes } = await page.cdp.send("Accessibility.queryAXTree", { objectId: document.result.objectId, role: target.role, accessibleName: target.name });
-  const matches = nodes.filter((node) => !node.ignored && node.backendDOMNodeId != null);
+  const { nodes } = await page.cdp.send("Accessibility.queryAXTree", { objectId: document.result.objectId, role: target.role });
+  const normalize = (name) => (name ?? "").replace(/\s+/g, " ").trim();
+  const wanted = normalize(target.name);
+  const matches = nodes.filter((node) => !node.ignored && node.backendDOMNodeId != null && normalize(node.name?.value) === wanted);
   if (matches.length === 0) return null;
   if (matches.length > 1) {
     throw new Error(`${describeTarget(target)} 匹配到 ${matches.length} 个元素，无法唯一确定；请换一个更具体的 name，或改用 CSS 选择器`);

@@ -12,8 +12,9 @@ const composeDir = path.join(root, "compose");
 const paths: ComposePaths = { taskDir, runDir, composeDir };
 
 fs.mkdirSync(taskDir, { recursive: true });
-fs.writeFileSync(path.join(taskDir, "ok.js"), `console.log(JSON.stringify({ status: "success", result: process.argv.slice(2) }, null, 2));\n`);
-fs.writeFileSync(path.join(taskDir, "noisy.js"), `console.log("progress line");\nconsole.log(JSON.stringify({ status: "success", result: process.argv.slice(2) }, null, 2));\n`);
+fs.writeFileSync(path.join(taskDir, "ok.js"), `/**\n * @param a? 甲\n * @param b? 乙\n */\nconsole.log(JSON.stringify({ status: "success", result: JSON.parse(process.env.YODO_PARAMS ?? "{}") }, null, 2));\n`);
+fs.writeFileSync(path.join(taskDir, "need.js"), `/**\n * @param q 必填\n */\nconsole.log(JSON.stringify({ status: "success", result: JSON.parse(process.env.YODO_PARAMS ?? "{}") }, null, 2));\n`);
+fs.writeFileSync(path.join(taskDir, "noisy.js"), `/**\n * @param a? 甲\n */\nconsole.log("progress line");\nconsole.log(JSON.stringify({ status: "success", result: JSON.parse(process.env.YODO_PARAMS ?? "{}") }, null, 2));\n`);
 fs.writeFileSync(path.join(taskDir, "bad.js"), `console.log(JSON.stringify({ status: "failure", error: "boom" }, null, 2));\nprocess.exitCode = 1;\n`);
 fs.writeFileSync(path.join(taskDir, "guide.js"), `console.log(JSON.stringify({ status: "need-extension", guide: "请连接扩展" }, null, 2));\nprocess.exitCode = 1;\n`);
 fs.writeFileSync(path.join(taskDir, "hang.js"), `setInterval(() => {}, 1000);\n`);
@@ -26,14 +27,18 @@ try {
 
   // 注入的 task()
   const task = createTask(paths);
-  assert.deepEqual(await task("ok", "a", 2), ["a", "2"]);
-  assert.deepEqual(await task("noisy", "x"), ["x"], "前面的非 JSON 输出应被跳过");
+  assert.deepEqual(await task("ok", { a: "a", b: 2 }), { a: "a", b: "2" }, "值统一转成字符串");
+  assert.deepEqual(await task("ok", { a: "a", b: undefined }), { a: "a" }, "undefined 视为没传");
+  assert.deepEqual(await task("noisy", { a: "x" }), { a: "x" }, "前面的非 JSON 输出应被跳过");
+  await assert.rejects(task("need"), (error) => error instanceof TaskError && /缺少必填参数：--q/.test(error.message));
+  await assert.rejects(task("ok", { zzz: 1 }), (error) => error instanceof TaskError && /没有这些参数：--zzz/.test(error.message));
+  await assert.rejects(task("ok", "x" as never), (error) => error instanceof TaskError && /参数要写成对象/.test(error.message));
 
   await assert.rejects(task("bad"), (error) => error instanceof TaskError && error.task === "bad" && error.message.startsWith("[bad] boom"));
   await assert.rejects(task("draft"), (error) => error instanceof TaskError && /草稿/.test(error.message));
   await assert.rejects(task("missing"), (error) => error instanceof TaskError && error.task === "missing");
   await assert.rejects(task("guide"), (error) => error instanceof HandshakeError && error.status === "need-extension");
-  assert.equal(fs.readdirSync(path.join(runDir, "ok")).length, 1, "内层 task 应写运行历史");
+  assert.equal(fs.readdirSync(path.join(runDir, "ok")).length, 2, "内层 task 每次成功调用写一条运行历史");
 
   // 内层 task 超时：被终止并按失败返回
   const quick = createTask({ ...paths, taskTimeoutMs: 400 });
@@ -42,11 +47,11 @@ try {
   // 完整组合：顺序执行、stdout 只有 JSON、console 走 stderr
   const chain = runEval(`
     console.log("composing");
-    const first = await task("ok", "1");
-    return await task("ok", ...first, "2");
+    const first = await task("ok", { a: "1" });
+    return await task("ok", { a: first.a, b: "2" });
   `, paths);
   assert.equal(chain.exitCode, 0, chain.stderr);
-  assert.deepEqual(JSON.parse(chain.stdout), { status: "success", result: ["1", "2"] });
+  assert.deepEqual(JSON.parse(chain.stdout), { status: "success", result: { a: "1", b: "2" } });
   assert.match(chain.stderr, /composing/);
 
   const failed = runEval(`return await task("bad");`, paths);

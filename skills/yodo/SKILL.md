@@ -13,7 +13,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 1. `yodo run` 列出 task 摘要。有能完成当前目标的 task，直接运行。
 2. 没有可用 task：`yodo record start`，告诉用户切换到标题为 `yodo record` 的窗口演示一遍（窗口在后台打开，不会自动跳到前台），用户回复后 `yodo record stop`。
 3. 读取 stop 返回的 `timeline` 与 `recordDir` 下的响应文件，写一个新 task。
-4. `yodo run <task> <参数>`。`status: success` 才算完成。通过后把文件头的 `@status` 改为 `verified`。
+4. `yodo run <task> --参数名 值`。`status: success` 才算完成。通过后把文件头的 `@status` 改为 `verified`。
 
 ## 2. 命令
 
@@ -22,7 +22,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 | 命令 | 作用 |
 |---|---|
 | `yodo run` | 列出 task 摘要（名称、`@status`、`@summary`、参数） |
-| `yodo run <task> [args...]` | 运行 task，stdout 输出 JSON |
+| `yodo run <task> [--参数名 值 ...]` | 运行 task，stdout 输出 JSON。参数一律具名：`--名字 值` 或 `--名字=值`，值里有空格要加引号；缺必填参数、传了没声明的参数、写成位置参数都会直接报错 |
 | `yodo eval '<代码>'` | 顺序组合多个 task，stdout 输出 JSON（见第 5.1 节） |
 | `yodo record start [name]` | 开始录制，在后台打开标题为 `yodo record` 的窗口 |
 | `yodo record stop` | 结束录制，输出 `recordDir` 与 `timeline` |
@@ -53,7 +53,17 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
   - 公共字段：`selector` 是页面里尽量稳定且唯一的 CSS 选择器（shadow DOM 里的元素用它所在宿主的选择器）；有多个标签页时带 `tab`（第几个），在 iframe 里的操作带 `frame`（iframe 的地址）。
   - `selector` 用于写 `click`、`fill` 等，但页面改版后可能失效，写 task 后要运行验证。键盘按键不记录，用回车提交的搜索只能从后面的请求和导航推断。
 - `record stop` 的输出里有 `warnings` 时，说明某些页面的点击、输入、滚动没有录到（只有网络请求）。把 `warnings` 的内容告诉用户，请用户重新演示这一步，不要根据缺失的动作推断。
-- 响应体存为 `recordDir` 下的文件。需要看响应时直接读取文件。
+- 响应体存为 `recordDir` 下的文件。需要看响应时直接读取文件。按 `timeline.jsonl` 里的 `file` 字段取，不要按文件名猜：同一个请求的页面 HTML 和接口 JSON 文件名只差后缀。
+
+### 读材料时逐条核对
+
+task 里写进去的每个选择器、地址、字段、id，都要在录制材料里找到来源，找不到就不要写：
+
+- **请求的域名和路径以录制里的 `url` 为准**。不要把绝对地址写成相对路径，也不要凭印象换域名（同一个站点的接口可能分在不同域名下）。
+- **同一个字段在不同类型的条目里位置可能不同**。列表里的条目要逐种类型看一遍，不能只看第一条就写取值路径。
+- **被操作对象的 id 要核对来自哪个请求、哪个字段**。页面可能预加载相邻内容，录制里同一类接口会出现好几个 id，要对上"本次点击的是哪一个"：看点击后发出的那个请求的路径或请求体，不要取名字相近的另一个接口里的 id。
+- **选择器要在真实页面上跑一遍确认只命中想要的元素**。录制时记下的 `selector` 在当时是唯一的，但页面内容变了可能不再唯一；取值范围太大（如整个 `main`）会连侧边栏、控件文字一起取进来。
+- **录制材料里没有的操作不要推断**。目标接口没出现在录制里，说明演示没覆盖这一步，请用户重录，不要拿别的接口凑。
 
 ## 5. 写 task
 
@@ -64,15 +74,16 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
  * @summary 按关键词搜索
  * @status: draft
  * @record <record name>
- * @param argv[2] 搜索词
+ * @param query 搜索词
+ * @param limit? 条数，默认 10
  */
 ```
 
 - `@status`：`draft` 或 `verified`。
 - `@record`：写 task 时使用的录制名。
 - `@timeout`：可选，整个 task 的最长运行秒数，默认 90。只有确实需要更久时才写，例如 `@timeout 180`；步骤超时之和应小于它，这样出错时能看到具体是哪一步。
-- `@param`：每个参数的含义。
-- 脚本通过 `process.argv` 读取参数。
+- `@param 名字 说明`：声明一个参数；名字后加 `?` 表示可选（`@param limit? 条数`），没有 `?` 的是必填。名字用字母、数字、下划线。`yodo run` 按这里校验，task 里不用再判断参数是否缺失。
+- 脚本通过 `yodo.params.名字` 读取参数，值都是字符串，需要数字时自己转（`Number(yodo.params.limit ?? 10)`）；可选参数没传时是 `undefined`。布尔开关写成 `--dryRun true`，task 里比较 `=== "true"`。
 
 SDK：
 
@@ -80,7 +91,7 @@ SDK：
 import { yodo, goto, evaluate, click, fill, press, toggle, expectRequest, serializeUrl } from "../task/lib/index.js";
 
 await yodo.run(async ({ page }) => {
-  await goto(page, serializeUrl({ bareUrl: "https://example.com/search", query: { q: process.argv[2] } }));
+  await goto(page, serializeUrl({ bareUrl: "https://example.com/search", query: { q: yodo.params.query } }));
   return evaluate(page, () => document.title);
 });
 ```
@@ -92,7 +103,7 @@ await yodo.run(async ({ page }) => {
 - `click`、`fill`、`press`、`check`、`select`、`toggle`：页面操作。第二个参数是定位：CSS 选择器字符串，或 `{ role, name }`（无障碍角色和名称，与录制里的 `role`、`name` 相同，优先用它）。`role`/`name` 必须唯一，有多个匹配会报错并给出数量，改用更具体的 name 或 CSS。动作会自动等待元素可见且可操作，默认 10 秒，`{ timeout }` 可改。
 - `scroll`、`waitForSelector`：页面操作，只接受 CSS 选择器。
 - `toggle(page, selector, { target: true | false })`：先读状态，已满足则返回 `already`，否则点击一次返回 `done`。有副作用的操作用它。
-- `expectRequest(page, { method, path }, action)`：执行 action，并等待它触发的请求完成，返回 `{ status, body }`。会发请求的操作用它判断是否成功。没有对应请求说明操作没有生效。
+- `expectRequest(page, { method, path }, action)`：执行 action，并等待它触发的请求完成，返回 `{ status, body }`（`body` 是响应文本）。会发请求的操作用它判断是否成功。没有对应请求说明操作没有生效。action 可以是 `goto`，用来接页面加载时自己发的请求（列表接口常是这样）。接口依赖页面算出来的签名、token 时没法自己复刻请求，就让页面自己发，用它接响应：接到的响应比读页面文字稳（页面文字里有"展开"之类的控件文字，列表还有懒加载）。
 - 不要在 task 里关闭用户已有的 tab，不要修改 holder 的状态。
 
 ### 写法
@@ -109,16 +120,17 @@ task 只有在确认结果正确时才能返回，否则必须抛出错误：
 - 接口请求必须检查 HTTP 状态码。非 200 时抛出错误，并说明原因（如未登录、无权限）。
 - 接口返回业务码的，必须检查业务码（如 `code !== 0`）。
 - 有副作用的操作，成功判断依据是操作后的状态或响应，而不是点击没有报错。
+- 有副作用的操作，返回值要带被操作对象的稳定 id（回答 id、动态 id、视频 id 等），成功判断按 id 去读那个对象的状态，不要按序号重读（列表顺序会变，刚操作过的内容也会改变列表）。id 常在操作发出的请求的路径或请求体里，也可能在列表接口的响应里，每个站点不同，要在录制里找到来源。确实拿不到时，返回值里写 `id: null` 并在错误或备注里说明原因，不要用序号顶替。没有 id，事后就没法精确还原这次操作改了什么。
 
 ### 5.1 组合
 
 用 `yodo eval` 顺序调用已有 task，代码运行在 async 函数中，`return` 的值作为 `result`：
 
 ```bash
-yodo eval 'const list = await task("x-search-recent", "claude", 3); return list.map((t) => t.text);'
+yodo eval 'const list = await task("x-search-recent", { keyword: "claude", count: 3 }); return list.map((t) => t.text);'
 ```
 
-- 组合中只能通过 `task(name, ...args)` 调用 task，不能访问页面。需要复用的逻辑写成 task。
+- 组合中只能通过 `task(name, { 参数名: 值 })` 调用 task，值会转成字符串，校验规则和命令行一致；不能访问页面。需要复用的逻辑写成 task。
 - 组合代码里的 `console.log` 输出到 stderr，stdout 只有最终 JSON。
 - `@status: draft` 的 task 不能在组合中调用。
 - 单个 task 的过滤、加工由你直接处理 JSON，不用 `eval`。

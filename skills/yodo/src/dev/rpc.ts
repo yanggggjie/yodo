@@ -1,5 +1,5 @@
 /**
- * dev 通道：本地验证用，默认关闭。设计与约束见 AGENTS.md 2.3 与 plan/dev-tools.md。
+ * dev 通道：本地验证用，默认关闭。设计与约束见 AGENTS.md 2.3。
  * 开关是标记文件 ~/.yodo/session/dev，每次请求都检查，不需要重启 holder。
  */
 import * as fs from "node:fs";

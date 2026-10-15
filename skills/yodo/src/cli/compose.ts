@@ -1,7 +1,7 @@
 /**
  * `yodo eval '<代码>'`：顺序组合已有 task。
  * 代码写入 session/compose/<时间戳>.mjs，用 Node 执行，结束后删除。
- * 组合里只能通过注入的 task(name, ...args) 调用 task，不访问页面。
+ * 组合里只能通过注入的 task(name, { 参数名: 值 }) 调用 task，不访问页面。
  */
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { COMPOSE_DIR, RUN_DIR, TASK_DIR } from "../utils/constants.ts";
 import { isHandshakeStatus, type HandshakeStatus } from "../protocol.ts";
 import { writeRunHistory } from "../run-history.ts";
-import { invokeTaskFile, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
+import { checkParams, invokeTaskFile, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 
 export interface ComposePaths {
   taskDir: string;
@@ -41,20 +41,27 @@ export class HandshakeError extends Error {
   }
 }
 
-export type TaskFn = (name: string, ...args: unknown[]) => Promise<unknown>;
+export type TaskFn = (name: string, params?: Record<string, unknown>) => Promise<unknown>;
 
 /** 创建注入给组合代码的 task()：检查存在与草稿，子进程运行，写运行历史，返回 result 或抛错。 */
 export function createTask(paths: ComposePaths = DEFAULT_PATHS): TaskFn {
-  return async (name, ...args) => {
+  return async (name, rawParams = {}) => {
     const file = taskFile(paths.taskDir, name);
     if (!fs.existsSync(file)) throw new TaskError(name, `task 不存在：${name}`);
     if (taskSummary(file).status === "draft") {
       throw new TaskError(name, `[${name}] 是草稿（@status: draft），组合中不允许调用；请先单独运行并验证为 verified`);
     }
 
-    const argv = args.map((arg) => String(arg));
+    if (typeof rawParams !== "object" || rawParams === null || Array.isArray(rawParams)) {
+      throw new TaskError(name, `[${name}] 参数要写成对象：task("${name}", { 参数名: 值 })`);
+    }
+    // 值统一转成字符串，和命令行一致；undefined 视为没传
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(rawParams)) if (value !== undefined) params[key] = String(value);
+    const problem = checkParams(file, params);
+    if (problem) throw new TaskError(name, `[${name}] ${problem}`);
     const timeoutMs = paths.taskTimeoutMs ?? taskTimeoutMs(file);
-    const run = invokeTaskFile(file, argv, timeoutMs);
+    const run = invokeTaskFile(file, params, timeoutMs);
     if (run.stderr) process.stderr.write(run.stderr);
     const output = taskOutput(run, timeoutMs) as {
       status?: string;
@@ -62,7 +69,7 @@ export function createTask(paths: ComposePaths = DEFAULT_PATHS): TaskFn {
       error?: string;
       guide?: string;
     };
-    writeRunHistory(name, { args: argv, output }, paths.runDir);
+    writeRunHistory(name, { params, output }, paths.runDir);
 
     if (output.status && isHandshakeStatus(output.status)) {
       throw new HandshakeError(output.status, output.guide ?? "");

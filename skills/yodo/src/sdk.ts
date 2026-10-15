@@ -61,7 +61,13 @@ export async function beginRun(peer: RpcPeer, waitMs = RUN_BUSY_WAIT_MS): Promis
   }
 }
 
+/** 命令行 `--名字 值` 传进来的参数，由 `yodo run` 通过环境变量交给 task；没传的参数不存在。 */
+function readParams(): Record<string, string> {
+  try { return JSON.parse(process.env.YODO_PARAMS ?? "{}") as Record<string, string>; } catch { return {}; }
+}
+
 export const yodo = {
+  params: readParams(),
   async run(fn: TaskFn): Promise<void> {
     const scriptAbs = process.argv[1] ?? "task";
     let restore: (() => void) | undefined;

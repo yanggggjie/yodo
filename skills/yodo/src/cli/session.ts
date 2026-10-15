@@ -1,38 +1,21 @@
 import * as fs from "node:fs";
 import { sleep } from "../utils/async.ts";
-import { HOLDER_READY_MS, SESSION_DIR, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "../utils/constants.ts";
+import { HOLDER_READY_MS, SESSION_DIR, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "../utils/constants.ts";
 import { HANDSHAKE_GUIDES, type HandshakeStatus, type JsonRpcError } from "../protocol.ts";
 import { chromeRunning } from "../browser/connect.ts";
 import { nativeHostInstalled } from "../native-messaging-host/install.ts";
-import { readVersion, type Version } from "../store/version.ts";
 import { sessionRpc } from "./rpc.ts";
 
 // holder 是 relay 拉起的常驻 daemon（relay 才是 Chrome 拉起的 native host），CLI 不启动它，只确认它在不在、不在时说清楚缺什么。
+// 存活判据只有一条：socket 能不能回 ping。pid 文件只是 holder 自己留下的展示信息，不参与判断。
 
-export function isPidAlive(pid: number): boolean {
-  if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function readSessionPid(): number | null {
-  try {
-    const n = Number(fs.readFileSync(SESSION_PID_FILE, "utf8").trim());
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearStaleSession(): void {
-  const pid = readSessionPid();
-  if (pid && isPidAlive(pid)) return;
+/**
+ * 清掉残留的 socket 文件。判据也是 ping：能应答（哪怕扩展没连上）说明 holder 活着，socket 留着；
+ * 完全没应答才当成残留。原来这里读 pid 文件判断，pid 文件丢了就会误删活着的 holder 的 socket。
+ */
+function clearStaleSession(ping: PingResult | null): void {
+  if (ping) return;
   if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_SOCK, { force: true });
-  fs.rmSync(SESSION_PID_FILE, { force: true });
 }
 
 /**
@@ -53,10 +36,8 @@ export type PingResult = {
 };
 type AttachResult = { ok: true; result: PingResult } | { ok: false; error: JsonRpcError };
 
-/** pid 文件存在且进程活着时发一次 ping；任何一步失败返回 null。 */
+/** 发一次 ping。连不上就返回 null——判据是 socket 本身，pid 文件丢了不影响。 */
 export async function tryPing(): Promise<PingResult | null> {
-  const pid = readSessionPid();
-  if (!pid || !isPidAlive(pid)) return null;
   try {
     return (await sessionRpc("ping", undefined, 2_000)) as PingResult;
   } catch {
@@ -74,30 +55,31 @@ export function missingStatus(): HandshakeStatus {
 /** daemon 重启后等新 daemon 连上的最长时间：扩展按 1 秒起的指数退避重连，再加 relay 拉起 daemon 的时间。 */
 const RESTART_WAIT_MS = 15_000;
 
-export type StaleResult =
+export type RestartResult =
+  | { action: "busy"; mode: string }
   | { action: "none" }
-  | { action: "busy" }
+  | { action: "killed" }
   | { action: "restarted"; ping: PingResult }
-  | { action: "exited" }
   | { action: "failed" };
 
 /**
- * daemon 的 build 和部署目录里的不同、且空闲时，请它退出，并等新 daemon 连上。
- * 扩展没连着时，新 daemon 要等扩展下次连接才会出现，不等。
- * 忙（run、录制）时不动它，下次空闲时的第一条命令会再来一遍。旧 daemon（ping 里没有 mode）也不动。
+ * 重启 holder：按 ping 里的 pid 发 SIGTERM（holder 收到后走 shutdown：收尾录制、关 run 窗、再退出），不请求它自己退出。
+ * 这样新旧 daemon 走同一条路，不依赖对方实现了哪个 RPC。
+ * - 忙（run、录制）时拒绝，不杀：会打断正在进行的操作。
+ * - 旧 daemon（ping 里没有 mode，无从判断忙闲）直接杀：它本来就没法保证"忙时不杀"，让它活着的代价更大。
+ * - 没有 holder：返回 none。
+ * - 扩展没连着时新 daemon 要等扩展下次连接才会出现，只返回 killed，不等。
  */
-export async function restartStaleDaemon(options: { version?: () => Version | null; waitMs?: number; ping?: PingResult | null } = {}): Promise<StaleResult> {
-  const installed = (options.version ?? readVersion)();
-  if (!installed) return { action: "none" };
-  const existing = options.ping === undefined ? await tryPing() : options.ping;
-  if (!existing || existing.mode === undefined || existing.build === installed.build) return { action: "none" };
-  if (existing.mode !== "idle") return { action: "busy" };
+export async function restartDaemon(options: { waitMs?: number } = {}): Promise<RestartResult> {
+  const existing = await tryPing();
+  if (!existing) return { action: "none" };
+  if (existing.mode !== undefined && existing.mode !== "idle") return { action: "busy", mode: existing.mode };
   try {
-    await sessionRpc("daemon.exit", undefined, 2_000);
+    process.kill(existing.pid, "SIGTERM");
   } catch {
-    return { action: "busy" }; // 刚好有人开始 run，或 daemon 已经在退出
+    return { action: "none" }; // 刚好已经退出
   }
-  if (!existing.extension) return { action: "exited" };
+  if (!existing.extension) return { action: "killed" };
   const deadline = Date.now() + (options.waitMs ?? RESTART_WAIT_MS);
   while (Date.now() < deadline) {
     await sleep(200);
@@ -108,8 +90,6 @@ export async function restartStaleDaemon(options: { version?: () => Version | nu
 }
 
 export interface AttachOptions {
-  /** 部署目录的版本，默认读 .version；自检里注入。 */
-  version?: () => Version | null;
   /** 判断缺什么，默认读本机状态；自检里注入。 */
   missingStatus?: () => HandshakeStatus;
   /** need-extension 时等待扩展连上的时间，默认 HOLDER_READY_MS。 */
@@ -125,33 +105,28 @@ async function ensureAttached(options: AttachOptions = {}): Promise<AttachResult
   fs.mkdirSync(SESSION_DIR, { recursive: true });
 
   // holder 在，且扩展链路接着：可用。holder 在 relay 断开后会存活一段时间，所以 ping 通还不够。
+  // 版本是不是最新的不在这里判断：换代码只在 setup.js 或 `yodo daemon restart` 时发生（见 restartDaemon），
+  // 不在每条命令里偷偷检查、重启——那样一条不相关的命令会隐式触发进程重启和几秒等待。
   const existing = await tryPing();
-  if (existing?.extension) {
-    const stale = await restartStaleDaemon({ version: options.version, ping: existing });
-    if (stale.action === "restarted") return { ok: true, result: stale.ping };
-    // 重启没等到新 daemon：往下走，按"扩展没连上"处理，等它重连或返回握手状态。
-    if (stale.action !== "failed") return { ok: true, result: existing };
-  } else if (existing) {
-    // daemon 在但扩展没连着：也让过期的 daemon 换掉，换完后新 daemon 会在扩展重连时出现。
-    await restartStaleDaemon({ version: options.version, ping: existing });
-  }
+  if (existing?.extension) return { ok: true, result: existing };
 
   // 没装 host 或 Chrome 没运行时扩展不可能连上，不用等；
   // holder 还在但 Chrome 已退出，也在这里被判成 need-chrome，而不是 need-extension。
   const early = status();
   if (early !== "need-extension") {
-    clearStaleSession();
+    clearStaleSession(existing);
     return handshakeFailure(early);
   }
 
   // Chrome 在运行且 host 已注册：扩展可能正在（重新）连接，等一会。
   const deadline = Date.now() + (options.readyMs ?? HOLDER_READY_MS);
+  let last = existing;
   while (Date.now() < deadline) {
     await sleep(200);
-    const found = await tryPing();
-    if (found?.extension) return { ok: true, result: found };
+    last = await tryPing();
+    if (last?.extension) return { ok: true, result: last };
   }
-  clearStaleSession();
+  clearStaleSession(last);
   return handshakeFailure(status());
 }
 

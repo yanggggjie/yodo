@@ -6,7 +6,7 @@ import {
   TASK_DIR,
   YODO_HOME,
 } from "../utils/constants.ts";
-import { isPidAlive, readSessionPid, tryPing } from "./session.ts";
+import { tryPing } from "./session.ts";
 import { readVersion } from "../store/version.ts";
 import { chromeRunning } from "../browser/connect.ts";
 import { EXTENSION_ID, HOLDER_ENTRY, RELAY_ENTRY, launcherPath, manifestPath, nativeHostInstalled } from "../native-messaging-host/install.ts";
@@ -75,15 +75,13 @@ async function collectChecks(): Promise<Check[]> {
   const chrome = chromeRunning();
   add({ name: "chrome", ok: chrome, detail: chrome ? "running" : "未运行", fix: "启动 Google Chrome", optional: true });
 
-  // pid 存活不代表 holder 可用：再 ping 一次，卡死的 holder 也会被发现。
-  const pid = readSessionPid();
-  const alive = pid !== null && isPidAlive(pid);
-  const ping = alive ? await tryPing() : null;
+  // 判据只有 socket 能不能回 ping。pid 文件丢了不影响——它只是展示信息，不代表 holder 不在。
+  const ping = await tryPing();
   const responding = ping?.extension === true;
   add({
     name: "holder",
     ok: responding,
-    detail: pid ? (responding ? `alive pid=${pid}` : ping ? `pid=${pid} 在运行，扩展未连接` : alive ? `pid=${pid} 无响应` : `stale pid=${pid}`) : "无",
+    detail: !ping ? "无" : responding ? `alive pid=${ping.pid}` : `pid=${ping.pid} 在运行，扩展未连接`,
     fix: "在 Chrome 中点一下 yodo 扩展的 service worker 或工具栏图标；仍无响应则在 chrome://extensions 刷新扩展",
     optional: true,
   });
@@ -91,18 +89,16 @@ async function collectChecks(): Promise<Check[]> {
   // 版本：运行中的 daemon 和已加载的扩展是不是部署目录里的最新版本。不影响退出码。
   const installed = readVersion();
   if (installed && ping) {
-    if (ping.mode === undefined) {
-      add({ name: "daemon-build", ok: false, detail: "旧版本的 daemon，不报告版本", fix: "结束 holder 进程，扩展重连时会启动新的", optional: true });
-    } else {
-      const same = ping.build === installed.build;
-      add({
-        name: "daemon-build",
-        ok: same,
-        detail: same ? installed.build : `运行中 ${ping.build || "(无)"}，已安装 ${installed.build}`,
-        fix: ping.mode === "idle" ? "下一条 yodo 命令会自动重启它" : "它正忙，空闲后的第一条命令会自动重启它",
-        optional: true,
-      });
-    }
+    // 旧 daemon 的 ping 里没有 build，显示成"(无)"，同样算和已安装的不同。
+    // 换代码只在 setup.js 或 yodo daemon restart 时发生，不是哪条命令自动做的；忙（run、录制）时换不掉，等空闲后再运行。
+    const same = ping.build === installed.build;
+    add({
+      name: "daemon-build",
+      ok: same,
+      detail: same ? installed.build : `运行中 ${ping.build || "(无)"}，已安装 ${installed.build}`,
+      fix: "运行 yodo daemon restart",
+      optional: true,
+    });
     if (ping.extension) {
       const loaded = ping.extensionBuild ?? "";
       add({

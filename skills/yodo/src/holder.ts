@@ -7,7 +7,7 @@ import { Mode, type Busy } from "./mode.ts";
 import { ensureHomeLayout } from "./store/layout.ts";
 import { readVersion } from "./store/version.ts";
 import { HANDSHAKE_GUIDES, RPC_ERRORS, handshakeStatusFromError, type JsonRpcNotification, type JsonRpcRequest, type JsonRpcResponse } from "./protocol.ts";
-import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_EXT_SOCK, SESSION_LOG, SESSION_PID_FILE, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
+import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS, RECORDING_DIR, SESSION_DIR, SESSION_EXT_SOCK, SESSION_LOG, SESSION_SOCK, SESSION_SOCK_IS_FILE } from "./utils/constants.ts";
 import { createLogger, setLogFile } from "./utils/logger.ts";
 
 const logger = createLogger("holder");
@@ -31,7 +31,7 @@ const link = new ExtensionLink();
 setActiveLink(link);
 /** run / 录制操作 / 录制进行中 的互斥和 RUN_BUSY 的 reason 都在 mode.ts。 */
 const mode = new Mode<ConnState>(liveRecordName);
-/** 本 daemon 启动时部署目录的 build；CLI 发现磁盘上的 build 不同且空闲时会请它退出（daemon.exit）。 */
+/** 本 daemon 启动时部署目录的 build；doctor 拿它和磁盘上的对比，不一致时提示重启（yodo daemon restart）。 */
 const startupBuild = readVersion()?.build ?? "";
 /** 当前连着的扩展报告的 build（扩展对自己的 background.js 与 manifest.json 取的哈希）。 */
 let extensionBuild = "";
@@ -89,13 +89,6 @@ function paramsOf(req: JsonRpcRequest): Record<string, unknown> { return req.par
 
 async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> {
   if (req.method === "ping") { if (chromeReady) await chromeReady.catch(() => {}); return pingBody(); }
-  if (req.method === "daemon.exit") {
-    // 只在空闲时退出，否则会打断正在进行的 run 或录制。先回应，再退出。
-    const kind = mode.kind();
-    if (kind !== "idle") throw busyError({ reason: kind === "run" ? "run" : kind === "record-op" ? "record-op" : "record", message: "daemon 正忙，空闲后再退出" });
-    setTimeout(() => void shutdown(0), 50);
-    return {};
-  }
   await ensureChrome();
   await reconciled;
   const params = paramsOf(req);
@@ -162,8 +155,7 @@ function onConnection(socket: net.Socket): void {
       void dispatch(req, conn).then((result) => write({ jsonrpc: "2.0", id: req.id, result }, true), (error) => write(responseError(req.id, error), true));
     }
   });
-  socket.on("close", () => { if (conn.runActive) void runEnd(conn).catch(warnCatch("run cleanup on close")); });
-  socket.on("error", () => {});
+  socket.on("close", () => { if (conn.runActive) void runEnd(conn).catch(warnCatch("run cleanup on close")); });  socket.on("error", () => {});
 }
 
 async function shutdown(code: number): Promise<void> {
@@ -177,7 +169,6 @@ async function shutdown(code: number): Promise<void> {
   extServer?.close();
   extSocket?.destroy();
   if (SESSION_SOCK_IS_FILE) { fs.rmSync(SESSION_SOCK, { force: true }); fs.rmSync(SESSION_EXT_SOCK, { force: true }); }
-  fs.rmSync(SESSION_PID_FILE, { force: true });
   if (browser) await disconnectChrome(browser).catch(warnCatch("disconnectChrome"));
   process.exit(code);
 }
@@ -263,7 +254,6 @@ export async function runHolder(): Promise<void> {
   server = await listenUnique(SESSION_SOCK, onConnection);
   if (!server) { logger.warn("CLI socket 被占用，本进程退出"); extServer.close(); if (SESSION_SOCK_IS_FILE) fs.rmSync(SESSION_EXT_SOCK, { force: true }); process.exit(0); }
   fs.rmSync(RECORDING_DIR, { recursive: true, force: true });
-  fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 });
   process.on("SIGINT", () => void shutdown(0));
   process.on("SIGTERM", () => void shutdown(0));
   process.on("uncaughtException", (error) => { logger.error("uncaughtException", error); void shutdown(1); });

@@ -125,7 +125,6 @@ const page = await rpc("run.begin");
 assert.ok(page.pageId, "run.begin 返回 pageId");
 console.log("run.begin ok, pageId=", page.pageId);
 assert.equal((await rpc("ping")).mode, "run", "run 进行中 ping.mode 为 run");
-await assert.rejects(rpc("daemon.exit"), /正忙/, "run 进行中 daemon 不能退出");
 
 // 页面事件推送：扩展上报的 tab 事件应按 pageId 推给当前 run
 child.stdin.write(frame({ type: "event", tabId: Number(page.pageId), method: "Page.loadEventFired", params: { timestamp: 1 } }));
@@ -150,7 +149,6 @@ closeRpc();
 const rec = await rpc("record.start", { name: "e2e" });
 console.log("record.start:", String(rec).slice(0, 120).replace(/\n/g, " "));
 assert.equal((await rpc("ping")).mode, "record", "录制进行中 ping.mode 为 record");
-await assert.rejects(rpc("daemon.exit"), /正忙/, "录制进行中 daemon 不能退出");
 await assert.rejects(rpc("run.begin"), (e) => e.data?.reason === "record", "录制进行中 run.begin 的 reason 是 record，SDK 不会等");
 const stopped = await rpc("record.stop");
 console.log("record.stop:", String(stopped).slice(0, 160).replace(/\n/g, " "));
@@ -187,8 +185,8 @@ relay2.stdin.end();
 await new Promise((r) => relay2.on("exit", r));
 closeRpc();
 
-// 空闲时 daemon.exit 先回应再退出（与 SIGTERM 走同一个 shutdown）
-await rpc("daemon.exit");
+// SIGTERM 走 shutdown：退出后 socket 文件被清掉（yodo daemon restart 就是按 pid 发这个信号）
+process.kill(daemonPid, "SIGTERM");
 await waitFor(async () => !fs.existsSync(SOCK));
 assert.equal(fs.existsSync(path.join(SESSION, "ext.sock")), false, "daemon 退出后扩展 socket 应被删除");
 console.log("shutdown ok");

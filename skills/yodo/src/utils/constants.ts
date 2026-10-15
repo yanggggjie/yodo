@@ -22,7 +22,6 @@ export const SESSION_SOCK = SESSION_SOCK_IS_FILE
   : `\\\\.\\pipe\\yodo-${createHash("sha256").update(os.homedir()).digest("hex").slice(0, 12)}`;
 /** relay 与 daemon 之间的扩展通道；win32 用独立 named pipe。 */
 export const SESSION_EXT_SOCK = SESSION_SOCK_IS_FILE ? path.join(SESSION_DIR, "ext.sock") : `${SESSION_SOCK}-ext`;
-export const SESSION_PID_FILE = path.join(SESSION_DIR, "pid");
 export const SESSION_LOG = path.join(SESSION_DIR, "log.jsonl");
 
 /** attach / idle 时的短 CDP 超时。与「最多 5 次」无关。 */

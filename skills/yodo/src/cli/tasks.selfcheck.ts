@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { headerTags, invokeTaskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
+import { checkParams, headerTags, invokeTaskFile, paramSpecs, parseCliParams, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 import { TASK_TIMEOUT_MS } from "../utils/constants.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-tasks-"));
@@ -16,7 +16,7 @@ try {
 
   // 超时：进程被终止，合成 failure（带 status），不依赖 task 自己输出
   const started = Date.now();
-  const timedOut = invokeTaskFile(hang, [], 400);
+  const timedOut = invokeTaskFile(hang, {}, 400);
   assert.ok(Date.now() - started < 5_000, "超时后应及时返回");
   assert.equal(timedOut.timedOut, true);
   const failure = taskOutput(timedOut, 400);
@@ -24,7 +24,7 @@ try {
   assert.match(String(failure.error), /未结束/);
 
   // 无法解析的输出：合成 failure，带退出码
-  const crashed = invokeTaskFile(crash, []);
+  const crashed = invokeTaskFile(crash, {});
   assert.equal(crashed.timedOut, false);
   assert.equal(crashed.exitCode, 3);
   assert.match(String(taskOutput(crashed).error), /退出码 3/);
@@ -46,21 +46,29 @@ try {
     "/**",
     " * @summary 搜索",
     " * @status draft",
-    " * @param argv[2] 词",
-    " * @param argv[3] 数量",
+    " * @param term 词",
+    " * @param count? 数量，默认 3",
     " */",
     "// @status: verified",
     "const note = '@summary 不是头部';",
     "",
   ].join("\n"));
-  assert.deepEqual(taskSummary(tricky), { name: "tricky", status: "draft", summary: "搜索", params: ["argv[2] 词", "argv[3] 数量"] });
+  assert.deepEqual(taskSummary(tricky), { name: "tricky", status: "draft", summary: "搜索", params: ["term 词", "count? 数量，默认 3"] });
+  assert.deepEqual(paramSpecs(tricky), [{ name: "term", optional: false, description: "词" }, { name: "count", optional: true, description: "数量，默认 3" }]);
+  assert.equal(checkParams(tricky, { term: "a" }), undefined);
+  assert.match(checkParams(tricky, { count: "1" })!, /缺少必填参数：--term/);
+  assert.match(checkParams(tricky, { term: "a", x: "1" })!, /没有这些参数：--x；可用：--term、--count/);
+  assert.deepEqual(parseCliParams(["--term", "a b", "--count=5"]), { params: { term: "a b", count: "5" } });
+  assert.deepEqual(parseCliParams(["--empty="]), { params: { empty: "" } }, "--名字= 表示空字符串");
+  assert.ok("error" in parseCliParams(["pos"]));
+  assert.ok("error" in parseCliParams(["--a", "1", "--a", "2"]));
   const noHeader = path.join(dir, "plain.js");
   fs.writeFileSync(noHeader, "// @status: draft\nconsole.log(1);\n");
   assert.equal(taskSummary(noHeader).status, "verified", "没有块注释头部时按 verified");
   assert.deepEqual(headerTags("#!/usr/bin/env node\n/** @status: draft */\n"), [["status", "draft"]]);
 
   // 正常输出：原样返回解析结果
-  assert.deepEqual(taskOutput(invokeTaskFile(ok, [])), { status: "success", result: 1 });
+  assert.deepEqual(taskOutput(invokeTaskFile(ok, {})), { status: "success", result: 1 });
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

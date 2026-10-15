@@ -1,0 +1,13 @@
+{
+  "id": "zhihu-top-answer-keyword",
+  "site": "https://www.zhihu.com",
+  "intent": "搜索 {query}，进入排第一的问题，展开赞同数最高的回答，判断回答里是否提到 {keyword}",
+  "params": {
+    "demo": { "query": "为什么天是蓝的", "keyword": "瑞利散射" },
+    "test": [
+      { "query": "为什么会做梦", "keyword": "大脑" },
+      { "query": "为什么猫怕水", "keyword": "水" }
+    ]
+  },
+  "check": "给出的是明确的「提到/没提到」判断；判断依据能对应到回答正文里的实际文字"
+}

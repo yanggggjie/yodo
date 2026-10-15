@@ -41,6 +41,44 @@ export function taskSummary(file: string): TaskSummary {
   };
 }
 
+export interface ParamSpec { name: string; optional: boolean; description: string }
+
+/** 解析文件头的 `@param 名字 说明` 与 `@param 名字? 说明`（带 ? 表示可选）。 */
+export function paramSpecs(file: string): ParamSpec[] {
+  return taskSummary(file).params.map((value) => {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*(.*)$/s.exec(value);
+    return match ? { name: match[1]!, optional: Boolean(match[2]), description: match[3]! } : { name: value, optional: false, description: "" };
+  });
+}
+
+/** 把命令行里 `--名字 值` / `--名字=值` 解析成参数表；不接受位置参数。 */
+export function parseCliParams(args: string[]): { params: Record<string, string> } | { error: string } {
+  const params: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    const match = /^--([A-Za-z_][A-Za-z0-9_]*)(?:=([\s\S]*))?$/.exec(arg);
+    if (!match) return { error: `参数要写成 --名字 值，不接受：${arg}` };
+    const name = match[1]!;
+    if (name in params) return { error: `参数重复：--${name}` };
+    if (match[2] !== undefined) { params[name] = match[2]; continue; }
+    const value = args[++i];
+    if (value === undefined) return { error: `参数 --${name} 缺少值` };
+    params[name] = value;
+  }
+  return { params };
+}
+
+/** 对照文件头的 @param 检查：缺必填、传了没声明的参数都返回说明；通过返回 undefined。 */
+export function checkParams(file: string, params: Record<string, string>): string | undefined {
+  const specs = paramSpecs(file);
+  const known = new Set(specs.map((spec) => spec.name));
+  const unknown = Object.keys(params).filter((name) => !known.has(name));
+  if (unknown.length) return `没有这些参数：${unknown.map((name) => `--${name}`).join("、")}；可用：${specs.map((spec) => `--${spec.name}`).join("、") || "（无）"}`;
+  const missing = specs.filter((spec) => !spec.optional && !(spec.name in params));
+  if (missing.length) return `缺少必填参数：${missing.map((spec) => `--${spec.name}（${spec.description}）`).join("、")}`;
+  return undefined;
+}
+
 /** 这个 task 的最长运行时间：文件头声明的 @timeout，否则 TASK_TIMEOUT_MS。 */
 export function taskTimeoutMs(file: string): number {
   const declared = taskSummary(file).timeout;
@@ -77,9 +115,10 @@ export interface TaskInvocation {
 }
 
 /** 子进程运行 task 文件，捕获 stdout 与 stderr；stdin 关闭；超过 timeoutMs 终止进程。 */
-export function invokeTaskFile(file: string, args: string[], timeoutMs = TASK_TIMEOUT_MS): TaskInvocation {
-  const child = child_process.spawnSync(process.execPath, [file, ...args], {
+export function invokeTaskFile(file: string, params: Record<string, string>, timeoutMs = TASK_TIMEOUT_MS): TaskInvocation {
+  const child = child_process.spawnSync(process.execPath, [file], {
     encoding: "utf8",
+    env: { ...process.env, YODO_PARAMS: JSON.stringify(params) },
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 512 * 1024 * 1024,
     timeout: timeoutMs,

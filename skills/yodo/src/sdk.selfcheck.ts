@@ -6,9 +6,8 @@ import * as path from "node:path";
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-sdk-"));
 process.env.HOME = TEST_HOME;
-const { SESSION_DIR, SESSION_SOCK, SESSION_PID_FILE } = await import("./utils/constants.ts");
+const { SESSION_DIR, SESSION_SOCK } = await import("./utils/constants.ts");
 fs.mkdirSync(SESSION_DIR, { recursive: true });
-fs.writeFileSync(SESSION_PID_FILE, `${process.pid}\n`);
 
 const seen: string[] = [];
 const server = net.createServer((socket) => {

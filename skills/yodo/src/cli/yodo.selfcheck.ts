@@ -23,7 +23,7 @@ function yodo(...args: string[]): { code: number; out: string; json: any } {
 }
 
 const write = (name: string, body: string): void => fs.writeFileSync(path.join(taskDir, `${name}.js`), body);
-write("ok", `/**\n * @summary 回显\n * @param argv[2] 词\n */\nconsole.log(JSON.stringify({ status: "success", result: process.argv.slice(2) }, null, 2));\n`);
+write("ok", `/**\n * @summary 回显\n * @param word 词\n * @param times? 次数\n */\nconsole.log(JSON.stringify({ status: "success", result: JSON.parse(process.env.YODO_PARAMS ?? "{}") }, null, 2));\n`);
 write("draft", `/**\n * @status: draft\n */\nconsole.log(JSON.stringify({ status: "success", result: "d" }));\n`);
 write("crash", `process.exit(3);\n`);
 // 走 SDK、且没有 holder：握手失败，退出码必须非零
@@ -48,10 +48,23 @@ try {
   assert.equal(byName.broken.status, "invalid");
 
   // run：成功原样输出并写历史；缺失与崩溃都是带 status 的 failure
-  const ok = yodo("run", "ok", "a");
+  const ok = yodo("run", "ok", "--word", "a");
   assert.equal(ok.code, 0);
-  assert.deepEqual(ok.json, { status: "success", result: ["a"] });
-  assert.equal(fs.readdirSync(path.join(home, ".yodo", "run", "ok")).length, 1);
+  assert.deepEqual(ok.json, { status: "success", result: { word: "a" } });
+  assert.deepEqual(yodo("run", "ok", "--word=b c", "--times", "2").json, { status: "success", result: { word: "b c", times: "2" } }, "--名字=值 与 --名字 值 都可以，值里可以有空格");
+  for (const [args, pattern] of [
+    [["run", "ok", "a"], /参数要写成 --名字 值/],
+    [["run", "ok"], /缺少必填参数：--word/],
+    [["run", "ok", "--word", "a", "--nope", "1"], /没有这些参数：--nope/],
+    [["run", "ok", "--word"], /缺少值/],
+    [["run", "ok", "--word", "a", "--word", "b"], /参数重复/],
+  ] as Array<[string[], RegExp]>) {
+    const bad = yodo(...args);
+    assert.equal(bad.code, 1, args.join(" "));
+    assert.equal(bad.json.status, "failure");
+    assert.match(bad.json.error, pattern);
+  }
+  assert.equal(fs.readdirSync(path.join(home, ".yodo", "run", "ok")).length, 2, "只有真正运行过的调用写历史，参数校验失败的不写");
   const missing = yodo("run", "nope");
   assert.equal(missing.code, 1);
   assert.match(missing.json.error, /task 不存在/);
@@ -70,8 +83,8 @@ try {
   assert.ok(Date.now() - started < 3_000, "没装 host 时应立即返回");
 
   // eval：组合成功；草稿被拒绝
-  const evalOk = yodo("eval", `return await task("ok", "x");`);
-  assert.deepEqual(evalOk.json, { status: "success", result: ["x"] });
+  const evalOk = yodo("eval", `return await task("ok", { word: "x" });`);
+  assert.deepEqual(evalOk.json, { status: "success", result: { word: "x" } });
   const evalDraft = yodo("eval", `return await task("draft");`);
   assert.equal(evalDraft.code, 1);
   assert.equal(evalDraft.json.failedTask, "draft");

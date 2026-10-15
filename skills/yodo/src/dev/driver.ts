@@ -1,5 +1,5 @@
 /**
- * dev Driver：在录制窗口里模拟用户操作。设计与约束见 plan/record-untrusted-and-dom-driver.md。
+ * dev Driver：在录制窗口里模拟用户操作。设计与约束见 AGENTS.md 2.3。
  * 全部是页面内的 DOM 操作（Runtime.evaluate），不使用 Input 域；录制器记录所有页面事件，不做区分。
  * 只用 Runtime.evaluate、Page.navigate、Page.handleJavaScriptDialog；不调用任何 *.disable。
  * 阻塞式对话框（confirm、alert）会让 evaluate 挂起：驱动在操作期间按 dialog 策略处理它。

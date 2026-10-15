@@ -33,7 +33,7 @@ node <安装目录>/setup.js
 3. 已经加载过：在 yodo 扩展卡片上点刷新。
 4. 完成后回复「好了」。
 
-daemon 不用手动重启：`setup.js` 会让空闲的旧 daemon 退出，并在扩展重连时换成新的；正忙时下一条命令会自动换。扩展本身不能自动更新，扩展代码有改动时 `doctor` 的 `extension-build` 会提示刷新。
+daemon 一般不用手动重启：`setup.js` 发现运行中的 daemon 是旧代码时，会让它退出，并在扩展重连时换成新的。装的时候 daemon 正忙（run、录制），`setup.js` 换不掉，会打印醒目的提示；等 run 或录制结束后运行 `yodo daemon restart`——不会有任何命令自动帮你换。扩展本身不能自动更新，扩展代码有改动时 `doctor` 的 `extension-build` 会提示刷新。
 
 刷新扩展会断开旧的 relay，Chrome 随后用新的 manifest 重新拉起 relay。relay 只转发消息，daemon 常驻不受影响；扩展代码或 relay 代码有改动时，必须做这一步才会生效。
 

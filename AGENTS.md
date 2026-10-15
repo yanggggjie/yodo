@@ -38,21 +38,23 @@ npm run verify:pack
 | `npm test` | 按文件名顺序逐个运行 `*.selfcheck.ts` |
 | `npm run verify:pack` | 使用隔离 HOME 执行真实的 `skills add`、setup 和 doctor |
 
+多文件改动时，改完全部文件再一次性跑 `check`/`test`，不要逐文件验证。这几个命令都不是瞬间返回：`check` 要过一遍 `npx` 解析，`test` 里有真实的 `sleep`/超时等待，`verify:pack` 是真实的 `npm install`；跑一次和跑五次的差距是实打实的时间。
+
 ### 2.3 dev：本地验证工具
 
-`dev` 服务于本地修改代码、debug、调算法，目的是拿到真实数据和真实现象，不是 CI，也不是通过 / 失败。设计与分步见 [plan/dev-tools.md](plan/dev-tools.md)。
+`dev` 服务于本地修改代码、debug、调算法，目的是拿到真实数据和真实现象，不是 CI，也不是通过 / 失败。
 
 **克制原则**（违反任何一条，先删再加）：
 
 1. **体量上限**：`dev` 相关代码（`skills/yodo/src/dev/`、`scripts/dev/`，不含 `*.selfcheck.*`）总量不超过生产代码的 15%。度量方式：生产代码为 `skills/yodo/src` 下除自检、`dev/` 外的 `.ts/.js/.mjs` 行数。
 2. **可整体删除**：生产代码里对 `dev` 只允许一行式调用，不放逻辑。删掉 `src/dev/` 和这些调用后，应用行为完全不变。
 3. **零新增运行时依赖**。本机开发工具只用于本地，不进发布内容。
-4. **每个能力必须对应一个真实发生过的痛点**，写进 plan。"将来可能用到"不算理由。
+4. **每个能力必须对应一个真实发生过的痛点**，写进提交说明。"将来可能用到"不算理由。
 5. **一进一出**：新增一个机制前，先评估能不能删掉旧的某个。
 6. **默认关闭，关闭时零行为差异。**
 
 另外：
-- 不新增 hub、事件目录、探针、`dev.eval` 等通用机制。需要进入运行中的 holder 时，用 Node 自带的 inspector（`kill -USR1 <holder pid>`）。plan 的"不做的事"列出了每一项以及重新考虑的条件。
+- 不新增 hub、事件目录、探针、`dev.eval` 等通用机制。需要进入运行中的 holder 时，用 Node 自带的 inspector（`kill -USR1 <holder pid>`）。
 - `dev` 不出现在 usage 和 SKILL.md，只写在这里。
 
 **用法**：
@@ -61,6 +63,7 @@ npm run verify:pack
 - `dev.pages`：列出扩展纳入的全部 tab（pageId、windowId、url、标题）。`record.start` 之后，录制页的标题是 `yodo record`。`record.start` 之后，录制页的标题是 `yodo record`。
 - `dev.cdp { pageId, method, params }`：对该页面发 CDP，包括录制窗口。拒绝 `*.disable`、`Target.*`、`Browser.*`。生产环境的 `cdp.send` 仍然只能在 run 中使用。
 - 脚本通过现有的 `sessionRpc` 调用这些 method。`skills/yodo/src/dev/driver.ts` 的 `DevPage` 全部是页面内的 DOM 操作（`goto` 用 `Page.navigate`，`click`、`type`、`press`、`scroll` 用页面脚本），不使用 `Input.*`。录制器不区分事件是否由用户触发，驱动、task-lib 与真人操作都会被录到。
+- dev 驱动和 task-lib 的输入行为不同：`DevPage.type` 逐字符写入，每个字符触发一个 `input` 事件；task-lib 的 `fill` 一次写入整个值，只触发一个 `input` 事件。演示里能行、写成 task 后不行时，这是排查时要考虑的一个变量；但它不是抖音"录制窗口能搜索、run 窗口不能"的原因（对照实验排除过），不要一开始就怀疑它。
 - 流水线：`runPipeline()` 返回每一级的输入数、输出数和丢弃原因；录制结束时写一行 `pipeline N → M` 日志，`data.stages` 里是各级明细。
 
 ```bash
@@ -118,7 +121,7 @@ skills/yodo/
 
 | 组成 | 位置 | 职责 |
 |---|---|---|
-| 命令入口 | `src/cli/yodo.ts`，由 `~/.yodo/bin/yodo` shim 调用 | `run`、`eval`、`record`、`doctor` |
+| 命令入口 | `src/cli/yodo.ts`，由 `~/.yodo/bin/yodo` shim 调用 | `run`、`eval`、`record`、`daemon restart`、`doctor` |
 | Task SDK | `src/sdk.ts` | 只向 task 暴露 `yodo.run({ page })`，在 client 进程运行 task 闭包 |
 | task-lib | `~/.yodo/task/lib/`，源码在 `src/templates/task-lib/` | 页面操作 helper、`toggle`、`expectRequest`、URL 工具 |
 | task | `~/.yodo/task/<name>.js` | 一个可独立执行和复用的流程，头部 `@status` 区分 `draft` 与 `verified` |
@@ -131,6 +134,7 @@ skills/yodo/
 - 握手失败返回 `need-install`、`need-chrome`、`need-extension`。`ping` 返回 `extension`（扩展链路是否接着）：holder 在 relay 断开后还会存活，所以 ping 通不代表可用；`extension` 不为 `true`（或 holder 不在）时，没装 host 或 Chrome 没运行立即返回，只有 `need-extension` 才等待扩展连接（`HOLDER_READY_MS`）。
 - 所有命令失败时 stdout 都带 `status`：`{ status: "failure", error }`，握手类为 `{ status, guide }`。退出码规则只有一条：`status` 为 `success` 时 0，其它一律非零（不另建错误码表；`protocol.ts` 的 `RPC_ERRORS` 只用于 holder 与 CLI 之间的 JSON-RPC）。
 - 并发：holder 同时只允许一个 run。`run.begin` 遇到另一个 run 或录制操作（错误的 `data.reason` 为 `run` 或 `record-op`）时，SDK 每 500ms 重试，最多 `RUN_BUSY_WAIT_MS`（30 秒）；`reason` 为 `record`（录制进行中）时不等待，直接报错。
+- task 参数一律具名：`yodo run <task> --名字 值`（也接受 `--名字=值`），不接受位置参数。`yodo run` 按文件头 `@param 名字 说明`（名字后带 `?` 为可选）校验：缺必填、传了没声明的、重复的、位置参数，都在启动子进程之前报错，不写运行历史。校验通过后，参数以 JSON 放进子进程的环境变量 `YODO_PARAMS`，task 里用 `yodo.params.名字` 读取（值都是字符串；`src/sdk.ts` 的 `readParams`）。`yodo eval` 里 `task(name, { 名字: 值 })` 走同一套校验，值先转成字符串。运行历史记录 `{ params, output }`。
 - task 文件头只认文件开头第一个块注释里的 `@标签`；读不了的文件在 `yodo run` 列表里标为 `status: "invalid"`，不影响其它 task。
 - 超时只有两层：单步骤 `STEP_TIMEOUT_MS`（30 秒，`src/templates/task-lib/page.js`，用于 `evaluate`、`goto`、`waitForSelector`、`expectRequest`；单条 CDP 命令的 `CDP_COMMAND_TIMEOUT_MS` 同为 30 秒）；整个 task 子进程 `TASK_TIMEOUT_MS`（90 秒），task 头部可用 `@timeout <秒>` 覆盖。超时被 SIGKILL 终止并按失败返回，`eval` 对每个内层 task 单独计时。
 - `goto` 默认等 DOMContentLoaded，且只认本次导航提交（主框架 `frameNavigated`）之后的事件，上一个页面还没发完的加载事件不算数；`until: "commit" | "load"` 可选；不换文档的跳转（hash、pushState）等 `navigatedWithinDocument`，提交之后出现的不算。`evaluate` 不发 `Runtime.enable`（`Runtime.evaluate` 不需要它，每次 enable 会让 Chrome 重发全部执行上下文事件）。`cdp.once` 不指定 `timeout` 时用单条命令的上限，不会一直挂着。
@@ -202,7 +206,7 @@ ping
 
 ### 4.5.1 模式（run / 录制互斥）
 
-`src/mode.ts` 的 `Mode` 是 daemon 里"忙不忙"的唯一来源：`idle`、`run`、`record-op`（start / stop / abort 正在执行）、`record`（录制进行中，由 `liveRecordName()` 提供，不重复保存）。`RUN_BUSY` 的判断、`reason`（`run`、`record-op`、`record`）和提示文字只在这里定义；SDK 靠 `reason` 决定要不要等（`run`、`record-op` 等，`record` 不等）。`ping` 返回 `mode`，`daemon.exit` 也读它。
+`src/mode.ts` 的 `Mode` 是 daemon 里"忙不忙"的唯一来源：`idle`、`run`、`record-op`（start / stop / abort 正在执行）、`record`（录制进行中，由 `liveRecordName()` 提供，不重复保存）。`RUN_BUSY` 的判断、`reason`（`run`、`record-op`、`record`）和提示文字只在这里定义；SDK 靠 `reason` 决定要不要等（`run`、`record-op` 等，`record` 不等）。`ping` 返回 `mode`，`yodo daemon restart` 靠它判断忙闲。
 
 ### 4.6 存储与安装
 
@@ -212,7 +216,7 @@ ping
 - `setup.js` 是安装引导脚本，依赖 skill 包本身，负责拷贝运行时、安装依赖、写版本文件、注册 native host、生成 shim、让过期的 daemon 换成新代码、运行 `doctor`。
 - 部署只拷运行时代码：排除 `node_modules`、`*.selfcheck.*`、`record/fixtures/`（规则是 `store/deploy.ts` 的 `isRuntimePath`，版本哈希用同一条）。`dev/rpc.ts` 被 `holder.ts` 静态 import，要部署；它默认关闭，由 `~/.yodo/session/dev` 控制。
 - 版本：`setup.js` 在 `~/.yodo/src/.version` 写 `{ build, extension }`（`store/version.ts`）。`build` 是运行时代码内容的哈希；`extension` 是 `chrome-extension/background.js` 与 `manifest.json` 字节依次拼接后 SHA-256 的前 16 位十六进制，扩展启动时对自己的两个文件算同一个值，随 `hello` 的 `buildId` 发给 daemon。开发时直接从仓库运行没有 `.version`，不做版本比较。
-- daemon 的版本：启动时记下自己的 `build`，`ping` 返回 `build`、`mode`、`extensionBuild`。`ensureAttached`（CLI 与 SDK 共用）和 `setup.js` 发现 `build` 与磁盘上的不同、且 `mode` 为 `idle` 时，发 `daemon.exit`（只在空闲时接受，先回应再退出），daemon 退出后 relay 随之退出，扩展按指数退避重连，Chrome 重新拉起 relay，relay 拉起新 daemon。忙（run、录制）时不动它，下一次空闲时的第一条命令再换；每次调用最多重启一次；旧 daemon（`ping` 里没有 `mode`）不动。扩展没连着时只让它退出，不等新的。
+- daemon 的版本：启动时记下自己的 `build`，`ping` 返回 `build`、`mode`、`extensionBuild`，纯上报，没有副作用。换代码只在两处发生，都不在 `ensureAttached`（CLI 与 SDK 每条命令都会走到）里——那样会让一条不相关的命令隐式触发进程重启和几秒等待：`setup.js` 发现运行中 daemon 的 `build` 与刚写入的不同时，和用户显式运行的 `yodo daemon restart`。两者都调 `restartDaemon`（`src/cli/session.ts`）：按 `ping` 里的 `pid` 发 `SIGTERM`（holder 收到后走 `shutdown`：收尾录制、关 run 窗、再退出），daemon 退出后 relay 随之退出，扩展按指数退避重连，Chrome 重新拉起 relay，relay 拉起新 daemon。不请求 daemon 自己退出（没有 `daemon.exit` 这个 RPC），所以新旧 daemon 走同一条路，不依赖对方实现了哪个方法。忙（`mode` 为 `run`、`record`、`record-op`）时拒绝，不杀，`setup.js` 会醒目地提示"没换成新代码，等空闲后运行 `yodo daemon restart`"；旧 daemon（`ping` 里没有 `mode`，无从判断忙闲）直接杀。扩展没连着时只让它退出，不等新的。
 - 扩展代码的更新不能自动完成：`doctor` 的 `extension-build` 在已加载的扩展与已安装的不同时提示"在 chrome://extensions 里刷新 yodo"。
 - `yodo doctor` 只读。
 
