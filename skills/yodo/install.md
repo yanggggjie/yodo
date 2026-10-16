@@ -2,10 +2,20 @@
 
 安装和升级使用同一套流程。以下步骤按顺序执行，每步完成后再进入下一步。
 
+## 对用户说话的规则
+
+整个安装过程里，只对用户说两类话：用户下一步要做什么；装完是否成功。
+
+- 不说内部状态：目录里有哪些文件、扩展 ID、native host、依赖安装、`doctor` 逐项结果、某一项为什么失败。
+- 第 3 步结束时 `doctor` 里 `holder` 失败，是扩展还没加载造成的，属于正常现象，不要向用户提。
+- 出问题时只告诉用户一件要做的事，一句话说清；用户追问再讲原因。
+- 冒烟测试可以自己做；通过就不提，只有失败才报告。
+
 ## 1. 检查环境
 
 - Node ≥24：`node -p process.version`。不满足时请用户升级 Node。
 - Google Chrome：确认已安装。未安装时把 https://www.google.com/chrome/ 交给用户，等待「好了」。
+- macOS 已验证。Windows 与 Linux 有适配代码，尚未充分测试；遇到问题照实告诉用户。
 
 ## 2. 同步 skill
 
@@ -23,19 +33,39 @@ node <安装目录>/setup.js
 
 ## 4. 加载或刷新 Chrome 扩展（需要用户操作）
 
-扩展不能由 agent 或脚本加载。请用户按以下步骤操作：
+扩展不能由 agent 或脚本加载。
 
-1. 打开 `chrome://extensions`，开启「开发者模式」。
-2. 第一次安装：点「加载已解压的扩展程序」，选择扩展目录。`setup.js` 不会替用户打开文件管理器，请你：
-   - 把 `setup.js` 输出的绝对路径告诉用户。
-   - 列出该目录下的文件（应包含 `manifest.json`、`background.js`），让用户能对照确认选的是哪个目录。
-   - 说明：macOS 在文件选择框按 `Cmd+Shift+G` 粘贴路径，Windows 在地址栏粘贴路径。
-3. 已经加载过：在 yodo 扩展卡片上点刷新。
-4. 完成后回复「好了」。
+先自己确认 `setup.js` 输出的扩展目录里有 `manifest.json`，不要把文件清单念给用户。
 
-daemon 一般不用手动重启：`setup.js` 发现运行中的 daemon 是旧代码时，会让它退出，并在扩展重连时换成新的。装的时候 daemon 正忙（run、录制），`setup.js` 换不掉，会打印醒目的提示；等 run 或录制结束后运行 `yodo daemon restart`——不会有任何命令自动帮你换。扩展本身不能自动更新，扩展代码有改动时 `doctor` 的 `extension-build` 会提示刷新。
+**第一次安装**，用 `node -p process.platform` 判断系统，把 `<扩展目录>` 换成 `setup.js` 输出的绝对路径，只对用户说对应系统的那一套：
 
-刷新扩展会断开旧的 relay，Chrome 随后用新的 manifest 重新拉起 relay。relay 只转发消息，daemon 常驻不受影响；扩展代码或 relay 代码有改动时，必须做这一步才会生效。
+macOS（`darwin`）：
+
+> 请在 Chrome 里加载 yodo 扩展：
+> 1. 打开 `chrome://extensions`，打开右上角「开发者模式」
+> 2. 点「加载已解压的扩展程序」，按 `Cmd+Shift+G`，粘贴 `<扩展目录>`，选择它
+> 3. 完成后告诉我「好了」
+
+Windows（`win32`）：
+
+> 请在 Chrome 里加载 yodo 扩展：
+> 1. 打开 `chrome://extensions`，打开右上角「开发者模式」
+> 2. 点「加载已解压的扩展程序」，在窗口顶部的地址栏粘贴 `<扩展目录>`，回车，再点「选择文件夹」
+> 3. 完成后告诉我「好了」
+
+Linux（`linux`）：
+
+> 请在 Chrome 里加载 yodo 扩展：
+> 1. 打开 `chrome://extensions`，打开右上角「开发者模式」
+> 2. 点「加载已解压的扩展程序」，按 `Ctrl+L`，粘贴 `<扩展目录>`，回车，再点「选择」
+> 3. 完成后告诉我「好了」
+
+**已经加载过（升级）**：只说「请在 `chrome://extensions` 里点 yodo 扩展卡片上的刷新，完成后告诉我『好了』」。
+
+以下是给 agent 的背景，不要讲给用户：
+
+- daemon 一般不用手动重启：`setup.js` 发现运行中的 daemon 是旧代码时，会让它退出，并在扩展重连时换成新的。装的时候 daemon 正忙（run、录制），`setup.js` 换不掉，会打印醒目的提示；等 run 或录制结束后运行 `yodo daemon restart`，不会有任何命令自动帮你换。
+- 扩展本身不能自动更新，扩展代码有改动时 `doctor` 的 `extension-build` 会提示刷新。刷新扩展会断开旧的 relay，Chrome 随后用新的 manifest 重新拉起 relay；扩展代码或 relay 代码有改动时，必须做刷新才会生效。
 
 ## 5. 验收
 
@@ -45,13 +75,17 @@ daemon 一般不用手动重启：`setup.js` 发现运行中的 daemon 是旧代
 ~/.yodo/bin/yodo doctor
 ```
 
-- 所有检查通过：报告安装成功。
-- 扩展未连接（`need-extension`）：请用户打开 `chrome://extensions` 确认扩展已开启，并点一下扩展的 service worker 或工具栏图标，然后重新运行 `doctor`。
-- `extension-build` 提示扩展版本不同或没有报告版本：请用户在 `chrome://extensions` 里刷新 yodo 扩展，再重新运行 `doctor`。
-- 其它失败：按 `doctor` 输出的修复命令处理，再重新运行 `doctor`。
+- 全部通过：进入第 6 步。
+- 扩展未连接（`need-extension`）：对用户只说「请在 `chrome://extensions` 里确认 yodo 扩展是开着的，再点一下它的图标」，然后重新运行 `doctor`。
+- `extension-build` 提示扩展版本不同或没有报告版本：对用户只说「请在 `chrome://extensions` 里刷新 yodo 扩展」，然后重新运行 `doctor`。
+- 其它失败：按 `doctor` 输出的修复命令自己处理，再重新运行 `doctor`；处理不了时，对用户说清需要他做的一件事。
+
+通过后可以自己做冒烟测试（例如 `yodo run` 列出 task、跑一个只读 task）。
 
 ## 6. 报告
 
-告诉用户：版本、安装目录、命令路径（`~/.yodo/bin/yodo`）、扩展状态。
+只告诉用户：
 
-命令可以用绝对路径调用；如果用户希望直接使用 `yodo`，可以把 `~/.yodo/bin` 加入 PATH。
+> yodo 安装成功。
+
+用户问到命令路径时再补充：命令是 `~/.yodo/bin/yodo`，可以用绝对路径调用，想直接用 `yodo` 就把 `~/.yodo/bin` 加入 PATH。不要主动报告版本、安装目录或扩展状态。

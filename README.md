@@ -94,8 +94,9 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 - 录制更完整：记录点击、输入、勾选、滚动和页面跳转（含单页应用、新标签页、iframe），并给出元素的选择器、角色和名称，学习更准确。录制和运行窗口都在后台打开，不抢焦点。
 - 命令统一为 `yodo`（`run`、`eval`、`record`、`daemon`、`doctor`）；task 参数改为具名，`yodo run <task> --参数 值`。
 - 运行更稳定：单步和整体超时、并发时自动等待、失败信息与退出码统一，并保存运行历史；`yodo eval` 可顺序组合多个 task。
-- 安装与升级更简单：自动检测并替换过期的后台进程，`doctor` 能报告版本是否一致。
+- 升级更简单：安装脚本会在后台进程空闲时自动换成新版本；正在运行任务或录制时，等结束后运行 `yodo daemon restart`。`doctor` 能报告版本是否一致。
 - 扩展有了图标；点击工具栏上的 yodo 图标，可以立即重新连接。
+- 系统支持：macOS 已验证；Windows 与 Linux 已有适配，尚未充分测试。
 - **不兼容**：v1 学会的、带参数的 task 需要改成具名参数（`@param 名字` 与 `yodo.params.名字`）才能继续使用；`~/.yodo/temp` 和 `@executor` 取消。
 
 #### v1.2.0
