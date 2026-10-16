@@ -9,7 +9,7 @@ import type {
   TimelineItem,
   TimelineRequestItem,
 } from "./types.ts";
-import { processDomTimeline, simpleDomTimeline } from "./dom.ts";
+import { simpleDomTimeline } from "./dom.ts";
 
 export function sanitizeFileNamePart(str: string): string {
   return str.replace(/[^a-zA-Z0-9.-]/g, "_").replace(/_+/g, "_").slice(0, 40);
@@ -113,6 +113,8 @@ export async function writeSemanticRequestFile(
 export type FlushResult = {
   name: string;
   recordDir: string;
+  /** 需要告诉用户的问题，例如某个页面的点击、输入、滚动没有录到。 */
+  warnings?: string[];
 };
 
 export async function writeArtifacts(
@@ -157,6 +159,8 @@ export function formatStopStdout(result: FlushResult): string {
       status: "stopped",
       name: result.name,
       recordDir: result.recordDir,
+      timeline: path.join(result.recordDir, "timeline.jsonl"),
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     },
     null,
     2,

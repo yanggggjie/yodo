@@ -7,7 +7,6 @@ import type {
   RequestKind,
 } from "./types.ts";
 
-export type AdblockEngine = FiltersEngine;
 
 let engine: FiltersEngine | undefined;
 let enginePromise: Promise<FiltersEngine> | undefined;
@@ -60,10 +59,6 @@ const BASE64URL = /^[A-Za-z0-9_-]+={0,2}$/;
 type Location = Redaction["location"];
 type Result<T> = { value: T; redactions: Redaction[] };
 
-function bytes(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
-
 function shape(value: string): Redaction["shape"] {
   if (JWT.test(value)) return "jwt";
   if (UUID.test(value)) return "uuid";
@@ -90,8 +85,8 @@ export class RecordSanitizer {
       this.aliases.set(raw, alias);
     }
     const kind = shape(raw);
-    out.push({ location, path, alias, shape: kind, bytes: bytes(raw) });
-    return `⟨${alias}:${kind}:bytes=${bytes(raw)}⟩`;
+    out.push({ location, path, alias, shape: kind });
+    return `⟨${alias}:${kind}⟩`;
   }
 
   sanitizeUrl(urlText: string): Result<YodoUrl> {
@@ -327,16 +322,31 @@ export function dedupeTimeline(timeline: RawEvent[]): number {
   return removed;
 }
 
-/** 纯：2xx → adblock → 脱敏 → 去重。零 fs、零 CDP。 */
-export function processTimelinePipeline(
+export type PipelineStage = { name: string; in: number; out: number; dropped: Record<string, number> };
+
+/** 纯：2xx → adblock → 脱敏 → 去重。零 fs、零 CDP。同时返回每一级的输入数、输出数与丢弃原因。 */
+export function runPipeline(
   rawTimeline: RawEvent[],
   loaded?: FiltersEngine,
-): RawEvent[] {
+): { events: RawEvent[]; stages: PipelineStage[] } {
   const sanitizer = new RecordSanitizer();
   const step1 = filterSuccessOnly(rawTimeline);
   const step2 = filterAdblock(step1, loaded);
   const step3 = step2.map((e) => sanitizeEvent(e, sanitizer));
   const step4 = [...step3];
-  dedupeTimeline(step4);
-  return step4;
+  const duplicates = dedupeTimeline(step4);
+  const stages: PipelineStage[] = [
+    { name: "success-only", in: rawTimeline.length, out: step1.length, dropped: step1.length < rawTimeline.length ? { "non-2xx": rawTimeline.length - step1.length } : {} },
+    { name: "adblock", in: step1.length, out: step2.length, dropped: step2.length < step1.length ? { adblock: step1.length - step2.length } : {} },
+    { name: "sanitize", in: step2.length, out: step3.length, dropped: {} },
+    { name: "dedupe", in: step3.length, out: step4.length, dropped: duplicates ? { "third-party-duplicate": duplicates } : {} },
+  ];
+  return { events: step4, stages };
+}
+
+export function processTimelinePipeline(
+  rawTimeline: RawEvent[],
+  loaded?: FiltersEngine,
+): RawEvent[] {
+  return runPipeline(rawTimeline, loaded).events;
 }

@@ -28,13 +28,6 @@ export function serializeUrl(u: YodoUrl): string {
   return `${u.bareUrl}?${sp.toString()}`;
 }
 
-export function urlOrigin(u: YodoUrl): string {
-  try {
-    return new URL(u.bareUrl).origin;
-  } catch {
-    return "";
-  }
-}
 
 /** Registrable domain (eTLD+1); falls back to hostname. */
 export function registrableDomain(u: YodoUrl): string {

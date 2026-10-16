@@ -1,48 +1,20 @@
 /**
- * client 侧的 task run 输出格式化：console 捕获、success/failure JSON、栈裁剪。
- * 从旧 exec/index.ts 迁来——task 现在在 client 进程跑，这些也搬到 client。
+ * client 侧的 task run 输出格式化：console 重定向、success/failure JSON、栈裁剪。
  */
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const MAX_STDOUT_BYTES = 8 * 1024;
-
-export function captureConsole(sink: string[]): () => void {
-  const orig = {
-    log: console.log,
-    info: console.info,
-    warn: console.warn,
-    error: console.error,
-  };
-  const write = (...args: unknown[]): void => {
-    sink.push(args.map((a) => (typeof a === "string" ? a : logStringify(a))).join(" "));
-  };
-  console.log = write;
-  console.info = write;
-  console.warn = write;
-  console.error = write;
-  return () => {
-    console.log = orig.log;
-    console.info = orig.info;
-    console.warn = orig.warn;
-    console.error = orig.error;
-  };
-}
-
-function logStringify(v: unknown): string {
-  if (v === undefined) return "undefined";
-  try {
-    return JSON.stringify(v, null, 2) ?? String(v);
-  } catch {
-    return String(v);
-  }
+/** task 运行期间把 console 输出改走 stderr，stdout 只留最后那段 JSON。返回恢复函数。 */
+export function consoleToStderr(): () => void {
+  const original = { log: console.log, info: console.info, warn: console.warn, error: console.error };
+  console.log = console.info = console.warn = console.error;
+  return () => Object.assign(console, original);
 }
 
 export function formatStack(err: unknown, scriptAbs: string): string[] {
   if (!(err instanceof Error)) return [String(err)];
-  const head = `${err.name}: ${err.message}`;
+  // RpcError 的 message 就是 holder 给用户的说明，加类名前缀只会添乱
+  const head = err.name === "RpcError" ? err.message : `${err.name}: ${err.message}`;
   const raw = err.stack ?? "";
   const dir = path.dirname(scriptAbs);
   const dirUrl = pathToFileURL(dir).href;
@@ -62,20 +34,8 @@ export function formatStack(err: unknown, scriptAbs: string): string[] {
   return lines;
 }
 
-export function runSuccessJson(scriptAbs: string, result: unknown): string {
-  const resultStr = JSON.stringify(result);
-  const resultBytes = resultStr ? Buffer.byteLength(resultStr) : 0;
-  if (resultBytes > MAX_STDOUT_BYTES) {
-    const outputFile = path.join(path.dirname(scriptAbs), "output.json");
-    try {
-      fs.writeFileSync(outputFile, resultStr, "utf8");
-      return JSON.stringify({ status: "success", resultFile: outputFile }, null, 2);
-    } catch {
-      const fallback = path.join(os.tmpdir(), `yodo-output-${Date.now()}.json`);
-      fs.writeFileSync(fallback, resultStr, "utf8");
-      return JSON.stringify({ status: "success", resultFile: fallback }, null, 2);
-    }
-  }
+/** stdout 始终输出完整 JSON；大结果由 task 自己裁剪，不再落盘。 */
+export function runSuccessJson(result: unknown): string {
   return JSON.stringify({ status: "success", result }, null, 2);
 }
 

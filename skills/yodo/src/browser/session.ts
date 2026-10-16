@@ -2,42 +2,28 @@
  * Raw CDP attach + session / page。
  * 只给 holder 用 connectChrome；record / exec 只用已有句柄。
  */
-import { NeedAllowError, resolveWsEndpoint } from "./connect.ts";
+import { requireActiveLink, type TabOps } from "./extension.ts";
 import { timeoutReject } from "../utils/async.ts";
-import { CDP_COMMAND_TIMEOUT_MS, CDP_SHORT_TIMEOUT_MS } from "../utils/constants.ts";
+import { CDP_SHORT_TIMEOUT_MS } from "../utils/constants.ts";
 import { createLogger } from "../utils/logger.ts";
 
 const logger = createLogger("browser");
 
-/** ponytail: flatten 下 envelope；升级 Playwright 不影响此路径 */
-export function envelopeCdpCommand(
-  id: number,
-  method: string,
-  params: Record<string, unknown> = {},
-  sessionId?: string,
-): Record<string, unknown> {
-  const msg: Record<string, unknown> = { id, method, params };
-  if (sessionId) msg.sessionId = sessionId;
-  return msg;
-}
-
-type Pending = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  timer?: ReturnType<typeof setTimeout>;
-  method: string;
-};
-
+/**
+ * 页面级 CDP 通道（扩展里是 chrome.debugger 按 tab 附加）。
+ * sessionId 即 tabId 的字符串形式；不再有 browser 级会话（browser 级操作走 ops）。
+ */
 export type RawCdpConnection = {
-  browserSessionId: string;
+  ops: TabOps;
+  chromeVersion: string;
   commandTimeoutMs: number;
-  rpc?: { id: string; op: string };
   send: (
     method: string,
     params?: Record<string, unknown>,
     sessionId?: string,
     timeoutMs?: number,
   ) => Promise<unknown>;
+  /** 页面事件：method 为 CDP 事件名，handler 第二参数是 sessionId；tab.* 为扩展事件。 */
   on: (
     method: string,
     handler: (params: unknown, sessionId?: string) => void,
@@ -46,216 +32,6 @@ export type RawCdpConnection = {
   isClosed: () => boolean;
   close: () => Promise<void>;
 };
-
-let sharedRawConnection: RawCdpConnection | null = null;
-
-async function getSharedRawCdp(wsUrl?: string): Promise<RawCdpConnection> {
-  if (sharedRawConnection && !sharedRawConnection.isClosed()) {
-    return sharedRawConnection;
-  }
-  const endpoint = wsUrl ?? (await resolveWsEndpoint());
-  sharedRawConnection = await connectRawCdp(endpoint);
-  return sharedRawConnection;
-}
-
-async function closeSharedRawCdp(): Promise<void> {
-  if (sharedRawConnection) {
-    const conn = sharedRawConnection;
-    sharedRawConnection = null;
-    await conn.close().catch(() => {});
-  }
-}
-
-export async function connectRawCdp(wsUrl: string): Promise<RawCdpConnection> {
-  const ws = new WebSocket(wsUrl);
-  await new Promise<void>((resolve, reject) => {
-    ws.addEventListener("open", () => resolve(), { once: true });
-    const fail = () => reject(new NeedAllowError());
-    ws.addEventListener("error", fail, { once: true });
-    ws.addEventListener("close", fail, { once: true });
-  });
-
-  let nextId = 1;
-  let closed = false;
-  let commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS;
-  let rpc: { id: string; op: string } | undefined;
-  const pending = new Map<number, Pending>();
-  const listeners = new Map<string, Set<(params: unknown, sessionId?: string) => void>>();
-  const closeHandlers = new Set<() => void>();
-
-  const logSendFail = (method: string, ms: number, err: Error): void => {
-    logger.warn(err.message, {
-      method,
-      ms,
-      err: err.message,
-      ...(rpc ?? {}),
-    });
-  };
-
-  const rejectAll = (reason: string): void => {
-    for (const [id, entry] of pending) {
-      if (entry.timer) clearTimeout(entry.timer);
-      pending.delete(id);
-      entry.reject(new Error(reason));
-    }
-  };
-
-  ws.addEventListener("message", (event) => {
-    let msg: {
-      id?: number;
-      method?: string;
-      params?: unknown;
-      sessionId?: string;
-      result?: unknown;
-      error?: { message?: string };
-    };
-    try {
-      msg = JSON.parse(String(event.data)) as typeof msg;
-    } catch {
-      return;
-    }
-
-    if (msg.id != null && pending.has(msg.id)) {
-      const entry = pending.get(msg.id)!;
-      if (entry.timer) clearTimeout(entry.timer);
-      pending.delete(msg.id);
-      if (msg.error) {
-        const err = new Error(msg.error.message ?? "raw CDP error");
-        logSendFail(entry.method, 0, err);
-        entry.reject(err);
-      } else {
-        entry.resolve(msg.result);
-      }
-      return;
-    }
-
-    if (!msg.method) return;
-    const handlers = listeners.get(msg.method);
-    if (!handlers?.size) return;
-    for (const handler of handlers) {
-      try {
-        handler(msg.params, msg.sessionId);
-      } catch (error) {
-        logger.warn("raw CDP handler fail", {
-          method: msg.method,
-          err: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  });
-
-  ws.addEventListener("close", () => {
-    closed = true;
-    rejectAll("raw CDP WebSocket closed");
-    for (const handler of closeHandlers) {
-      try {
-        handler();
-      } catch {
-        /* ignore */
-      }
-    }
-  });
-
-  const send = (
-    method: string,
-    params: Record<string, unknown> = {},
-    sessionId?: string,
-    timeoutMs?: number,
-  ): Promise<unknown> => {
-    if (closed) return Promise.reject(new Error("raw CDP closed"));
-    const ms = timeoutMs ?? commandTimeoutMs;
-    const id = nextId++;
-    const payload = JSON.stringify(envelopeCdpCommand(id, method, params, sessionId));
-    return new Promise((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      if (ms > 0) {
-        timer = setTimeout(() => {
-          if (pending.has(id)) {
-            pending.delete(id);
-            const err = new Error(`CDP command timed out after ${ms}ms: ${method}`);
-            logSendFail(method, ms, err);
-            reject(err);
-          }
-        }, ms);
-        timer.unref?.();
-      }
-      pending.set(id, { resolve, reject, timer, method });
-      ws.send(payload);
-    });
-  };
-
-  const on = (
-    method: string,
-    handler: (params: unknown, sessionId?: string) => void,
-  ): (() => void) => {
-    let set = listeners.get(method);
-    if (!set) {
-      set = new Set();
-      listeners.set(method, set);
-    }
-    set.add(handler);
-    return () => {
-      set!.delete(handler);
-      if (set!.size === 0) listeners.delete(method);
-    };
-  };
-
-  const onClose = (handler: () => void): (() => void) => {
-    closeHandlers.add(handler);
-    return () => {
-      closeHandlers.delete(handler);
-    };
-  };
-
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    rejectAll("raw CDP closing");
-    ws.close();
-    await new Promise<void>((resolve) => {
-      if (ws.readyState === WebSocket.CLOSED) {
-        resolve();
-        return;
-      }
-      ws.addEventListener("close", () => resolve(), { once: true });
-    });
-  };
-
-  logger.info("raw CDP connected");
-  const attached = (await send("Target.attachToBrowserTarget")) as {
-    sessionId: string;
-  };
-  const browserSessionId = attached.sessionId;
-
-  const conn: RawCdpConnection = {
-    browserSessionId,
-    get commandTimeoutMs() {
-      return commandTimeoutMs;
-    },
-    set commandTimeoutMs(v: number) {
-      commandTimeoutMs = v;
-    },
-    get rpc() {
-      return rpc;
-    },
-    set rpc(v: { id: string; op: string } | undefined) {
-      rpc = v;
-    },
-    send,
-    on,
-    onClose,
-    isClosed: () => closed,
-    close,
-  };
-  return conn;
-}
-
-export const PAGE_AUTO_ATTACH = {
-  autoAttach: true,
-  flatten: true,
-  waitForDebuggerOnStart: false,
-  filter: [{ type: "page" }],
-} as const;
 
 /** 录制空白 tab 的 document.title，给人在后台找到这扇窗。 */
 export const RECORD_WINDOW_TITLE = "yodo record";
@@ -266,118 +42,36 @@ export function isChromeUiUrl(url: string): boolean {
   return url.startsWith("chrome://") || url.startsWith("devtools://");
 }
 
-/** page session only when enabling. browser session may only turn it off. */
-export function setPageAutoAttach(
-  raw: Pick<RawCdpConnection, "send" | "browserSessionId">,
-  enabled: boolean,
-  sessionId?: string,
-): Promise<unknown> {
-  const sid = sessionId ?? raw.browserSessionId;
-  if (enabled && sid === raw.browserSessionId) {
-    return Promise.resolve();
-  }
-  return raw
-    .send(
-      "Target.setAutoAttach",
-      {
-        autoAttach: enabled,
-        flatten: true,
-        waitForDebuggerOnStart: false,
-        filter: PAGE_AUTO_ATTACH.filter,
-      },
-      sid,
-    )
-    .catch((err) => {
-      logger.warn("setPageAutoAttach failed", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    });
-}
-
-export function setDiscoverTargets(
-  raw: Pick<RawCdpConnection, "send">,
-  discover: boolean,
-): Promise<unknown> {
-  return raw.send("Target.setDiscoverTargets", { discover }).catch((err) => {
-    logger.warn("setDiscoverTargets failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-  });
-}
-
-export function setIgnoreCertificateErrors(
-  raw: Pick<RawCdpConnection, "send">,
-  ignore: boolean,
-): Promise<unknown> {
-  return raw.send("Security.setIgnoreCertificateErrors", { ignore }).catch((err) => {
-    logger.warn("setIgnoreCertificateErrors failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-  });
-}
-
 export type EvaluateFn<T = unknown> = (...args: any[]) => T | Promise<T>;
 
 export class CdpPage {
   readonly targetId: string;
   readonly sessionId: string;
   private raw: RawCdpConnection;
-  private currentUrl: string;
   private closed = false;
-  private consoleListeners: Set<(msg: string) => void> = new Set();
   private inited = false;
   private offs: Array<() => void> = [];
 
+  /** autoDialog：JS 对话框（alert、confirm、prompt、beforeunload）自动点"确定"。run 页面无人值守才开；录制页面由用户自己选。 */
   constructor(
     raw: RawCdpConnection,
     targetId: string,
     sessionId: string,
-    initialUrl = "about:blank",
+    autoDialog = false,
   ) {
     this.raw = raw;
     this.targetId = targetId;
     this.sessionId = sessionId;
-    this.currentUrl = initialUrl;
-    this.initListeners();
+    if (autoDialog) this.initListeners();
   }
 
   private initListeners(): void {
-    this.offs.push(
-      this.raw.on("Page.frameNavigated", (params, sessId) => {
-        if (sessId !== this.sessionId) return;
-        const data = params as { frame: { id: string; parentId?: string; url: string } };
-        if (!data?.frame?.parentId && data.frame.url) {
-          this.currentUrl = data.frame.url;
-        }
-      }),
-    );
-
     this.offs.push(
       this.raw.on("Page.javascriptDialogOpening", async (_params, sessId) => {
         if (sessId !== this.sessionId) return;
         await this.raw
           .send("Page.handleJavaScriptDialog", { accept: true }, this.sessionId)
           .catch(() => {});
-      }),
-    );
-
-    this.offs.push(
-      this.raw.on("Runtime.consoleAPICalled", (params, sessId) => {
-        if (sessId !== this.sessionId) return;
-        const data = params as {
-          type: string;
-          args: { type: string; value?: unknown; description?: string }[];
-        };
-        const text = (data.args || [])
-          .map((a) => (a.value !== undefined ? String(a.value) : a.description || ""))
-          .join(" ");
-        for (const listener of this.consoleListeners) {
-          try {
-            listener(`[page:${data.type}] ${text}`);
-          } catch {
-            /* ignore */
-          }
-        }
       }),
     );
   }
@@ -392,15 +86,6 @@ export class CdpPage {
     ]);
   }
 
-  onConsole(listener: (msg: string) => void): () => void {
-    this.consoleListeners.add(listener);
-    return () => this.consoleListeners.delete(listener);
-  }
-
-  url(): string {
-    return this.currentUrl;
-  }
-
   isClosed(): boolean {
     return this.closed;
   }
@@ -409,85 +94,12 @@ export class CdpPage {
     this.closed = true;
     for (const off of this.offs) off();
     this.offs = [];
-    this.consoleListeners.clear();
-  }
-
-  async title(): Promise<string> {
-    if (this.closed) return "";
-    try {
-      return (await this.evaluate<string>("document.title")) || "";
-    } catch {
-      return "";
-    }
-  }
-
-  async bringToFront(): Promise<void> {
-    if (this.closed) return;
-    await this.raw.send("Page.bringToFront", {}, this.sessionId).catch(() => {});
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.markClosed();
-    await this.raw.send("Target.closeTarget", { targetId: this.targetId }).catch(() => {});
-  }
-
-  async goto(
-    url: string,
-    options?: { timeout?: number },
-  ): Promise<void> {
-    if (this.closed) throw new Error("Target is closed");
-    const timeoutMs = options?.timeout ?? this.raw.commandTimeoutMs;
-
-    await this.initPage();
-
-    let cleanup: (() => void) | undefined;
-    const waitPromise = new Promise<void>((resolve) => {
-      const offDom = this.raw.on("Page.domContentEventFired", (_params, sessId) => {
-        if (sessId === this.sessionId) resolve();
-      });
-      const offLoad = this.raw.on("Page.loadEventFired", (_params, sessId) => {
-        if (sessId === this.sessionId) resolve();
-      });
-      const offNav = this.raw.on("Page.frameNavigated", (params, sessId) => {
-        if (sessId === this.sessionId) {
-          const data = params as { frame: { parentId?: string; url: string } };
-          if (!data?.frame?.parentId) resolve();
-        }
-      });
-      cleanup = () => {
-        offDom();
-        offLoad();
-        offNav();
-      };
-    });
-
-    try {
-      const navPromise = this.raw.send(
-        "Page.navigate",
-        { url },
-        this.sessionId,
-      ) as Promise<{ frameId?: string; errorText?: string }>;
-
-      const navResult = await Promise.race([
-        navPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`goto timeout after ${timeoutMs}ms: ${url}`)), timeoutMs),
-        ),
-      ]);
-
-      if (navResult?.errorText) {
-        throw new Error(`net navigation error: ${navResult.errorText}`);
-      }
-
-      await Promise.race([
-        waitPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
-      ]);
-      this.currentUrl = url;
-    } finally {
-      cleanup?.();
-    }
+    await this.raw.ops.closeTab(Number(this.targetId)).catch(() => {});
   }
 
   async evaluate<T = unknown>(
@@ -527,7 +139,7 @@ export class CdpPage {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/timed out/i.test(msg)) {
-        logger.warn(`evaluate timeout ${this.currentUrl}`, {
+        logger.warn(`evaluate timeout tab ${this.targetId}`, {
           method: "Runtime.evaluate",
           err: msg,
         });
@@ -548,162 +160,183 @@ export class CdpPage {
 
 }
 
-async function pageTargets(
+/** 扩展里 yodo 自己拥有的 tab（只含 yodo 创建或由其打开的）。 */
+async function ownedPages(
   raw: RawCdpConnection,
-): Promise<{ targetId: string; type?: string }[]> {
-  const res = (await raw.send("Target.getTargets")) as {
-    targetInfos?: { targetId: string; type?: string }[];
-  };
-  return (res.targetInfos ?? []).filter((t) => t.type === "page");
+): Promise<{ targetId: string; windowId: number; url: string }[]> {
+  const { tabs } = await raw.ops.listOwned();
+  return tabs.map((t) => ({ targetId: String(t.tabId), windowId: t.windowId, url: t.url }));
 }
 
-/** 关掉一批 page。若会关到 Chrome 只剩这些，先开一扇后台空白窗，避免退出。 */
+/** 关掉一批 tab。若会关到 yodo 的 tab 只剩这些，先开一扇后台空白窗，避免窗口全没。 */
 export async function closeTargetsKeepChrome(
   raw: RawCdpConnection,
   targetIds: Iterable<string>,
 ): Promise<void> {
   const closing = new Set(targetIds);
   if (closing.size === 0) return;
-  let pages: { targetId: string; type?: string }[] = [];
+  let pages: { targetId: string }[] = [];
   try {
-    pages = await pageTargets(raw);
+    pages = await ownedPages(raw);
   } catch {
     pages = [];
   }
   const leftover = pages.filter((t) => !closing.has(t.targetId));
   if (leftover.length === 0) {
-    await raw
-      .send("Target.createTarget", {
-        url: "about:blank",
-        newWindow: true,
-        background: true,
-        focus: false,
-      })
-      .catch(() => {});
+    // 标题与 run 窗锚点一致：对账和下一次 run 会把它当作 run 窗，而不是永远关不掉的空白窗
+    const keep = await raw.ops.openWindow({ focused: false }).catch(() => null);
+    if (keep) {
+      await raw.ops.attach(keep.tabId)
+        .then(() => raw.send("Runtime.evaluate", { expression: `document.title = ${JSON.stringify(RUN_WINDOW_TITLE)}` }, String(keep.tabId)))
+        .then(() => raw.ops.detach(keep.tabId))
+        .catch(() => {});
+    }
   }
   await Promise.all(
-    [...closing].map((targetId) =>
-      raw.send("Target.closeTarget", { targetId }).catch(() => {}),
-    ),
+    [...closing].map((targetId) => raw.ops.closeTab(Number(targetId)).catch(() => {})),
   );
 }
 
 export class CdpContext {
   private raw: RawCdpConnection;
   private pagesMap = new Map<string, CdpPage>();
-  private sessionToTarget = new Map<string, string>();
   private runWindowId: number | null = null;
   private runAnchorId: string | null = null;
+  private runTabId: string | null = null;
 
   constructor(raw: RawCdpConnection) {
     this.raw = raw;
-    this.initTargetListeners();
-  }
-
-  private initTargetListeners(): void {
-    this.raw.on("Target.attachedToTarget", (params) => {
-      const e = params as {
-        sessionId: string;
-        targetInfo: { targetId: string; type: string; url?: string };
-      };
-      const chromeUi =
-        e.targetInfo.url?.startsWith("chrome://") ||
-        e.targetInfo.url?.startsWith("devtools://");
-      if (e.targetInfo.type !== "page" || chromeUi) {
-        return;
-      }
-      if (this.pagesMap.has(e.targetInfo.targetId)) {
-        this.sessionToTarget.set(e.sessionId, e.targetInfo.targetId);
-      }
+    // 扩展上报：tab 被用户或 Chrome 关掉 / 调试器被分离（如用户点了提示条的 Cancel）。
+    // ponytail: 分离后不自动重新附加，之后对该页的命令会报 PAGE_NOT_FOUND。
+    this.raw.on("tab.removed", (params) => {
+      const { tabId } = params as { tabId: number };
+      this.forgetPage(String(tabId));
     });
-
-    this.raw.on("Target.detachedFromTarget", (params) => {
-      const e = params as { sessionId: string; targetId?: string };
-      const targetId = e.targetId || this.sessionToTarget.get(e.sessionId);
-      if (targetId) {
-        this.sessionToTarget.delete(e.sessionId);
-        const page = this.pagesMap.get(targetId);
-        if (page) {
-          page.markClosed();
-          this.pagesMap.delete(targetId);
-        }
-      }
-    });
-
-    this.raw.on("Target.targetDestroyed", (params) => {
-      const e = params as { targetId: string };
-      const page = this.pagesMap.get(e.targetId);
-      if (page) {
-        page.markClosed();
-        this.pagesMap.delete(e.targetId);
-      }
-      if (e.targetId === this.runAnchorId) this.runAnchorId = null;
+    this.raw.on("tab.detached", (params) => {
+      const { tabId } = params as { tabId: number };
+      this.forgetPage(String(tabId));
     });
   }
 
-  async init(): Promise<void> {
-    await setPageAutoAttach(this.raw, false);
-  }
-
+  /** 锚点 tab 保留，不参与 detach；它保证 run 窗存活。 */
   runKeepIds(): Set<string> {
     return this.runAnchorId ? new Set([this.runAnchorId]) : new Set();
   }
 
-  async openRunWindow(): Promise<CdpPage> {
-    if (!(await this.runWindowAlive())) {
-      this.forgetRunMeta();
-      return await this.createRunWindow();
-    }
-    return await this.ensureAnchor();
-  }
-
   async openRecordWindow(): Promise<{ page: CdpPage; windowId: number }> {
-    const page = await this.createPage({
-      url: "about:blank",
-      newWindow: true,
-      background: true,
-      focus: false,
-    });
-    await page.evaluate(`document.title = ${JSON.stringify(RECORD_WINDOW_TITLE)}`);
-    const win = (await this.raw.send("Browser.getWindowForTarget", {
-      targetId: page.targetId,
-    })) as { windowId?: number };
-    if (win?.windowId == null) {
-      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
-      this.forgetPage(page.targetId);
-      throw new Error("record 窗没有 windowId");
-    }
-    return { page, windowId: win.windowId };
-  }
-
-  /** 这一次 run 结束：tab 回到 about:blank，标题改回 `yodo run`。不关窗。 */
-  async endRunTabs(): Promise<void> {
-    if (this.runWindowId == null) return;
-    if (!(await this.runWindowAlive())) {
-      this.forgetRunMeta();
-      return;
-    }
-    const inWin = await this.targetsInRunWindow();
-    for (const id of inWin) {
-      if (id === this.runAnchorId) continue;
-      await this.raw.send("Target.closeTarget", { targetId: id }).catch(() => {});
-      this.forgetPage(id);
-    }
+    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false, kind: "record" });
     try {
-      const page = await this.ensureAnchor();
-      await page.goto("about:blank");
-      await this.setTabTitle(page, RUN_WINDOW_TITLE);
-    } catch {
-      this.forgetRunMeta();
+      const page = await this.attachTarget(String(tabId), false);
+      await page.evaluate(`document.title = ${JSON.stringify(RECORD_WINDOW_TITLE)}`);
+      return { page, windowId };
+    } catch (err) {
+      await this.raw.ops.closeWindow(windowId).catch(() => {});
+      this.forgetPage(String(tabId));
+      throw err;
     }
   }
 
-  /** holder 停：整扇 run 窗关掉。 */
-  async closeRunWindow(): Promise<void> {
-    const ids = new Set(await this.targetsInRunWindow());
-    if (this.runAnchorId) ids.add(this.runAnchorId);
+  /** run 窗：不存在或已被用户关闭时静默重建，锚点 tab 标题为 yodo run。 */
+  private async ensureRunWindow(): Promise<number> {
+    if (this.runWindowId != null && this.runAnchorId != null) {
+      if ((await this.windowIdOf(this.runAnchorId)) === this.runWindowId) return this.runWindowId;
+    }
     this.forgetRunMeta();
-    await closeTargetsKeepChrome(this.raw, ids);
+    const { windowId, tabId } = await this.raw.ops.openWindow({ focused: false });
+    const anchor = await this.attachTarget(String(tabId), true);
+    await anchor.evaluate(`document.title = ${JSON.stringify(RUN_WINDOW_TITLE)}`);
+    this.runWindowId = windowId;
+    this.runAnchorId = anchor.targetId;
+    return windowId;
+  }
+
+  /**
+   * 扩展（重新）连上后对账：刷新扩展会让 debugger 附加状态和窗口登记与 holder 的记录脱节。
+   * - 没有进行中的 run 时丢弃全部页面记录（附加状态未知，之后按需重新 attach）。
+   * - 按标题识别 yodo 的窗口：当前 run 窗保留；记录失效时收养一扇已有的 run 窗，窗口数量不增加。
+   * - run 窗里除锚点外的残留 tab 关掉；其它 `yodo run` 窗口是孤儿，整扇关闭；录制进行中不碰 `yodo record` 窗口。
+   * 只关被标题确认的 yodo 窗口，从不按 id 关用户的窗口。
+   */
+  async reconcile(options: { recordLive: boolean; runActive: boolean }): Promise<void> {
+    const { tabs } = await this.raw.ops.listOwned();
+    const alive = new Set(tabs.map((t) => String(t.tabId)));
+    for (const [id, page] of [...this.pagesMap]) {
+      if (options.runActive && alive.has(id)) continue;
+      page.markClosed();
+      this.pagesMap.delete(id);
+    }
+    if (!options.runActive) this.runTabId = null;
+
+    const windows = new Map<number, typeof tabs>();
+    for (const tab of tabs) {
+      const group = windows.get(tab.windowId) ?? [];
+      group.push(tab);
+      windows.set(tab.windowId, group);
+    }
+    const anchorOf = (windowId: number): (typeof tabs)[number] | undefined =>
+      windows.get(windowId)?.find((t) => t.title === RUN_WINDOW_TITLE);
+
+    const current = this.runWindowId != null ? anchorOf(this.runWindowId) : undefined;
+    if (!current || String(current.tabId) !== this.runAnchorId) {
+      if (!options.runActive) this.forgetRunMeta();
+      const adopt = [...windows.keys()].sort((a, b) => a - b).find((id) => anchorOf(id));
+      if (adopt != null && !options.runActive) {
+        this.runWindowId = adopt;
+        this.runAnchorId = String(anchorOf(adopt)!.tabId);
+      }
+    }
+
+    for (const [windowId, group] of windows) {
+      if (windowId === this.runWindowId) {
+        for (const tab of group) {
+          const id = String(tab.tabId);
+          if (id === this.runAnchorId || id === this.runTabId) continue;
+          await this.raw.ops.closeTab(tab.tabId).catch(() => {});
+        }
+        continue;
+      }
+      const isRun = group.some((t) => t.title === RUN_WINDOW_TITLE);
+      const isRecord = group.some((t) => t.title === RECORD_WINDOW_TITLE);
+      if (isRun || (isRecord && !options.recordLive)) {
+        logger.info("reconcile: 关闭孤儿窗口", { windowId, kind: isRun ? "run" : "record" });
+        await this.raw.ops.closeWindow(windowId).catch(() => {});
+      }
+    }
+  }
+
+  /** 每次 run 都新开一个 tab，不复用。 */
+  async newPage(): Promise<CdpPage> {
+    const windowId = await this.ensureRunWindow();
+    const { tabId } = await this.raw.ops.openTab({ windowId, url: "about:blank", active: true });
+    this.runTabId = String(tabId);
+    return await this.attachTarget(String(tabId), true);
+  }
+
+  /** run 结束：关闭本次 run 的 tab，以及 run 期间新开的 tab（点 target=_blank 链接等，扩展按 opener 纳入）；锚点保留。 */
+  async endRunTab(): Promise<void> {
+    const id = this.runTabId;
+    if (id != null) {
+      this.runTabId = null;
+      this.forgetPage(id);
+      await this.raw.ops.detach(Number(id)).catch(() => {});
+      await this.raw.ops.closeTab(Number(id)).catch(() => {});
+    }
+    await this.closeStrayRunTabs();
+  }
+
+  /** run 窗口里除锚点外还在的 tab。只在 run 结束、没有别的 run 时调用。弹出的独立窗口不在这里处理。 */
+  private async closeStrayRunTabs(): Promise<void> {
+    if (this.runWindowId == null) return;
+    const { tabs } = await this.raw.ops.listOwned().catch(() => ({ tabs: [] }));
+    const stray = tabs.filter((t) => t.windowId === this.runWindowId && String(t.tabId) !== this.runAnchorId);
+    await Promise.all(stray.map((t) => this.raw.ops.closeTab(t.tabId).catch(() => {})));
+  }
+
+  /** holder 停：关掉整扇 run 窗。 */
+  async closeRunWindow(): Promise<void> {
+    const windowId = this.runWindowId;
+    this.forgetRunMeta();
+    if (windowId != null) await this.raw.ops.closeWindow(windowId).catch(() => {});
     await this.detachAllPages();
   }
 
@@ -711,19 +344,16 @@ export class CdpContext {
     const pages = [...this.pagesMap.values()].filter((p) => !keep.has(p.targetId));
     for (const page of pages) {
       this.pagesMap.delete(page.targetId);
-      this.sessionToTarget.delete(page.sessionId);
       page.markClosed();
     }
     await Promise.all(
-      pages.map(async (page) => {
-        await this.raw
-          .send("Target.detachFromTarget", { sessionId: page.sessionId }, this.raw.browserSessionId)
-          .catch((err) => {
-            logger.warn("detachFromTarget failed", {
-              err: err instanceof Error ? err.message : String(err),
-            });
+      pages.map((page) =>
+        this.raw.ops.detach(Number(page.targetId)).catch((err) => {
+          logger.warn("detach failed", {
+            err: err instanceof Error ? err.message : String(err),
           });
-      }),
+        }),
+      ),
     );
   }
 
@@ -732,121 +362,33 @@ export class CdpContext {
     if (page) {
       page.markClosed();
       this.pagesMap.delete(targetId);
-      this.sessionToTarget.delete(page.sessionId);
     }
+    if (targetId === this.runAnchorId) this.runAnchorId = null;
+    if (targetId === this.runTabId) this.runTabId = null;
   }
 
   private forgetRunMeta(): void {
     this.runWindowId = null;
     this.runAnchorId = null;
+    this.runTabId = null;
   }
 
   private async windowIdOf(targetId: string): Promise<number | undefined> {
     try {
-      const win = (await this.raw.send("Browser.getWindowForTarget", { targetId })) as {
-        windowId?: number;
-      };
-      return win?.windowId;
+      return (await this.raw.ops.windowOf(Number(targetId))).windowId;
     } catch {
       return undefined;
     }
   }
 
-  private async targetsInRunWindow(): Promise<string[]> {
-    if (this.runWindowId == null) return [];
-    const ids: string[] = [];
-    try {
-      for (const t of await pageTargets(this.raw)) {
-        if ((await this.windowIdOf(t.targetId)) === this.runWindowId) ids.push(t.targetId);
-      }
-    } catch {
-      return ids;
-    }
-    return ids;
-  }
-
-  private async runWindowAlive(): Promise<boolean> {
-    if (this.runWindowId == null) return false;
-    if (this.runAnchorId != null) {
-      if ((await this.windowIdOf(this.runAnchorId)) === this.runWindowId) return true;
-    }
-    return (await this.targetsInRunWindow()).length > 0;
-  }
-
-  private async setTabTitle(page: CdpPage, title: string): Promise<void> {
-    await page.evaluate(`document.title = ${JSON.stringify(title)}`);
-  }
-
-  private async createRunWindow(): Promise<CdpPage> {
-    const page = await this.createPage({
-      url: "about:blank",
-      newWindow: true,
-      background: true,
-      focus: false,
-    });
-    const windowId = await this.windowIdOf(page.targetId);
-    if (windowId == null) {
-      await this.raw.send("Target.closeTarget", { targetId: page.targetId }).catch(() => {});
-      this.forgetPage(page.targetId);
-      throw new Error("run 窗没有 windowId");
-    }
-    this.runWindowId = windowId;
-    this.runAnchorId = page.targetId;
-    await this.setTabTitle(page, RUN_WINDOW_TITLE);
-    return page;
-  }
-
-  private async ensureAnchor(): Promise<CdpPage> {
-    if (this.runWindowId == null) return await this.createRunWindow();
-    if (this.runAnchorId) {
-      const existing = this.pagesMap.get(this.runAnchorId);
-      if (existing && !existing.isClosed()) {
-        if ((await this.windowIdOf(existing.targetId)) === this.runWindowId) {
-          await this.setTabTitle(existing, RUN_WINDOW_TITLE).catch(() => {});
-          return existing;
-        }
-      }
-    }
-    if (this.runAnchorId) {
-      const w = await this.windowIdOf(this.runAnchorId);
-      if (w === this.runWindowId) {
-        const page = await this.attachTarget(this.runAnchorId);
-        await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
-        return page;
-      }
-    }
-    const inWin = await this.targetsInRunWindow();
-    const reuse = inWin[0];
-    if (reuse) {
-      const page = await this.attachTarget(reuse);
-      this.runAnchorId = page.targetId;
-      await page.goto("about:blank").catch(() => {});
-      await this.setTabTitle(page, RUN_WINDOW_TITLE).catch(() => {});
-      return page;
-    }
-    this.forgetRunMeta();
-    return await this.createRunWindow();
-  }
-
-  private async attachTarget(targetId: string, url = "about:blank"): Promise<CdpPage> {
+  private async attachTarget(targetId: string, autoDialog: boolean): Promise<CdpPage> {
     const existing = this.pagesMap.get(targetId);
     if (existing && !existing.isClosed()) return existing;
-    const attachRes = (await this.raw.send("Target.attachToTarget", {
-      targetId,
-      flatten: true,
-    })) as { sessionId: string };
-    const page = new CdpPage(this.raw, targetId, attachRes.sessionId, url);
-    this.sessionToTarget.set(attachRes.sessionId, targetId);
+    await this.raw.ops.attach(Number(targetId));
+    const page = new CdpPage(this.raw, targetId, targetId, autoDialog);
     this.pagesMap.set(targetId, page);
     await page.initPage();
     return page;
-  }
-
-  private async createPage(params: Record<string, unknown>): Promise<CdpPage> {
-    const createRes = (await this.raw.send("Target.createTarget", params)) as {
-      targetId: string;
-    };
-    return this.attachTarget(createRes.targetId);
   }
 
   pages(): CdpPage[] {
@@ -856,22 +398,14 @@ export class CdpContext {
   getPage(targetId: string): CdpPage | undefined {
     return this.pagesMap.get(targetId);
   }
-
-  async newPage(): Promise<CdpPage> {
-    const page = await this.openRunWindow();
-    await page.goto("about:blank");
-    return page;
-  }
 }
 
 export class CdpBrowser {
   readonly raw: RawCdpConnection;
-  private contextInstance: CdpContext;
   private disconnectListeners: Set<() => void> = new Set();
 
-  constructor(raw: RawCdpConnection, context: CdpContext) {
+  constructor(raw: RawCdpConnection) {
     this.raw = raw;
-    this.contextInstance = context;
 
     raw.onClose(() => {
       for (const listener of this.disconnectListeners) {
@@ -884,21 +418,8 @@ export class CdpBrowser {
     });
   }
 
-  contexts(): CdpContext[] {
-    return [this.contextInstance];
-  }
-
   async version(): Promise<string> {
-    try {
-      const ver = (await this.raw.send("Browser.getVersion")) as { product?: string };
-      return ver?.product || "Google Chrome (CDP)";
-    } catch {
-      return "Google Chrome (CDP)";
-    }
-  }
-
-  isConnected(): boolean {
-    return !this.raw.isClosed();
+    return this.raw.chromeVersion || "Google Chrome (extension)";
   }
 
   on(event: "disconnected", listener: () => void): void {
@@ -912,31 +433,20 @@ export class CdpBrowser {
   }
 }
 
+/** 扩展已经经 relay 连上 holder；这里只是把它包成 browser / context。 */
 export async function connectChrome(): Promise<{
   browser: CdpBrowser;
   context: CdpContext;
 }> {
-  const ws = await resolveWsEndpoint();
-  const raw = await getSharedRawCdp(ws);
-
+  const raw = requireActiveLink().raw;
+  await timeoutReject(raw.ops.listOwned(), CDP_SHORT_TIMEOUT_MS, "extension ping");
   const context = new CdpContext(raw);
-  await context.init();
-
-  const browser = new CdpBrowser(raw, context);
-
-  try {
-    await timeoutReject(raw.send("Target.getTargets"), CDP_SHORT_TIMEOUT_MS, "attach");
-  } catch (e) {
-    await disconnectChrome(browser);
-    throw e;
-  }
-
-  logger.info("Chrome connected");
+  const browser = new CdpBrowser(raw);
+  logger.info("extension connected");
   return { browser, context };
 }
 
 export async function disconnectChrome(browser: CdpBrowser): Promise<void> {
-  await closeSharedRawCdp().catch(() => {});
   await browser.close().catch(() => {});
-  logger.info("Chrome disconnected");
+  logger.info("extension link closed");
 }

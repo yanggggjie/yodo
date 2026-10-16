@@ -17,17 +17,6 @@ export async function writeJsonAtomic(
   });
 }
 
-export async function writeTextAtomic(
-  file: string,
-  content: string,
-): Promise<void> {
-  await ensureDir(path.dirname(file));
-  await writeFileAtomic(file, content, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-}
-
 export async function exists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);

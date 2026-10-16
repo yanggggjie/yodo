@@ -50,8 +50,8 @@ try {
     "setup.js",
     "src/sdk.ts",
     "src/holder.ts",
-    "src/bin/start.js",
-    "src/bin/record-start.js",
+    "src/cli/yodo.ts",
+    "src/cli/shim.ts",
     "src/store/deploy.ts",
     "src/templates/task-lib/index.js",
     "src/templates/task-lib/url.js",
@@ -69,6 +69,13 @@ try {
   const dest = path.join(HOME, ".yodo", "src");
   assert.ok(fs.existsSync(path.join(dest, "sdk.ts")), "~/.yodo/src 未建好");
   assert.ok(fs.existsSync(path.join(dest, "LICENSE")), "setup 后缺 LICENSE");
+  // 部署的只有运行时代码：没有自检和夹具；有 .version（daemon 和扩展的版本检测靠它）；dev/rpc.ts 被 holder 静态 import，要在
+  assert.ok(!fs.existsSync(path.join(dest, "record", "fixtures")), "部署目录里不应有 record/fixtures");
+  assert.ok(!fs.existsSync(path.join(dest, "record", "dom.selfcheck.ts")), "部署目录里不应有 *.selfcheck.*");
+  assert.ok(fs.existsSync(path.join(dest, "dev", "rpc.ts")), "部署目录缺 dev/rpc.ts");
+  const version = JSON.parse(fs.readFileSync(path.join(dest, ".version"), "utf8"));
+  assert.match(version.build, /^[0-9a-f]{16}$/, ".version 缺 build");
+  assert.match(version.extension, /^[0-9a-f]{16}$/, ".version 缺 extension");
   assert.ok(
     fs.existsSync(path.join(dest, "node_modules", "tldts", "dist", "cjs", "index.js")),
     "setup 后缺 tldts",
@@ -83,7 +90,7 @@ try {
 
   const doctor = spawnSync(
     process.execPath,
-    [path.join(dest, "bin", "doctor.js")],
+    [path.join(dest, "cli", "yodo.ts"), "doctor"],
     { env, encoding: "utf8" },
   );
   assert.equal(doctor.status, 0, `doctor 失败：${doctor.stderr || doctor.stdout}`);

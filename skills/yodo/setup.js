@@ -7,7 +7,11 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyRuntime } from "./src/store/deploy.ts";
-import { stopCurrentHolder } from "./src/cli/spawn.ts";
+import { writeVersion } from "./src/store/version.ts";
+import { restartDaemon, tryPing } from "./src/cli/session.ts";
+import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
+import { ensureHomeLayout } from "./src/store/layout.ts";
+import { EXTENSION_DIR, installNativeHost, manifestPath } from "./src/native-messaging-host/install.ts";
 
 const major = Number(process.versions.node.split(".")[0]);
 if (!Number.isFinite(major) || major < 24) {
@@ -18,11 +22,8 @@ if (!Number.isFinite(major) || major < 24) {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, "src");
 const DEST = path.join(os.homedir(), ".yodo", "src");
-const SESSION = path.join(os.homedir(), ".yodo", "session");
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
-await stopCurrentHolder();
-fs.rmSync(SESSION, { recursive: true, force: true });
 copyRuntime(SRC, DEST);
 fs.copyFileSync(path.join(HERE, "LICENSE"), path.join(DEST, "LICENSE"));
 console.log(`yodo src 拷贝 → ${DEST}`);
@@ -52,7 +53,30 @@ if (!fs.existsSync(path.join(DEST, DEPS_MARKER))) {
   process.exit(1);
 }
 
-const init = spawnSync(process.execPath, [path.join(DEST, "bin", "init.js")], {
+const version = writeVersion(DEST);
+console.log(`yodo 版本 → ${version.build}`);
+
+installNativeHost(process.execPath);
+console.log(`native messaging host 已注册 → ${manifestPath()}`);
+console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
+
+ensureHomeLayout();
+writeShim(process.execPath);
+console.log(`yodo 命令 shim → ${BIN_DIR}`);
+
+// 正在运行的 daemon 还是旧代码：build 不同才请它退出，扩展重连时会拉起新的（代码没变就不动，免得白白断一次扩展链路）。
+// 旧 daemon 的 ping 里没有 build，也算不同。忙（run、录制）时换不掉，要提醒到位，
+// 否则会一直用着旧 daemon，旧 daemon 的问题看起来像新代码的问题。
+const running = await tryPing();
+if (running && running.build !== version.build) {
+  const restarted = await restartDaemon();
+  if (restarted.action === "restarted") console.log("daemon 已更新为新版本");
+  else if (restarted.action === "killed") console.log("旧 daemon 已退出，扩展重连时会启动新的");
+  else if (restarted.action === "failed") console.log("旧 daemon 已退出，但新 daemon 还没连上；请稍等，或在 chrome://extensions 刷新 yodo");
+  else if (restarted.action === "busy") console.log(`\n!!! daemon 正忙（${restarted.mode}），没有换成新代码，现在跑的还是旧版本。\n!!! 等 run 或录制结束后运行：yodo daemon restart\n`);
+}
+
+const doctor = spawnSync(process.execPath, [path.join(DEST, "cli", "yodo.ts"), "doctor"], {
   stdio: "inherit",
 });
-process.exit(init.status ?? 0);
+process.exit(doctor.status ?? 0);

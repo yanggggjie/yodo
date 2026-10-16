@@ -12,15 +12,11 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = {
 };
 
 let globalLogFile: string | undefined;
-let minLevel: LogLevel = (process.env.YODO_LOG_LEVEL as LogLevel) || "INFO";
+const minLevel: LogLevel = (process.env.YODO_LOG_LEVEL as LogLevel) || "INFO";
 
 export function setLogFile(filePath: string | undefined): void {
   globalLogFile = filePath;
   if (filePath) fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-export function setMinLogLevel(level: LogLevel): void {
-  minLevel = level;
 }
 
 /** 丢掉最旧的，保住最近约 maxBytes（下一行 JSON 边界）。不要 truncate(0)。 */
@@ -57,6 +53,7 @@ function extraFields(meta?: unknown): Record<string, unknown> {
   if (typeof o.id === "string") out.id = o.id;
   if (typeof o.method === "string") out.method = o.method;
   if (typeof o.ms === "number") out.ms = o.ms;
+  if (o.data !== undefined) out.data = o.data;
   if (typeof o.err === "string") out.err = o.err;
   else if (o.err instanceof Error) out.err = o.err.stack || o.err.message;
   return out;

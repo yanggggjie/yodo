@@ -1,0 +1,13 @@
+{
+  "id": "tencent-doc-append-note",
+  "site": "https://docs.qq.com",
+  "intent": "打开「最近编辑」里的第 1 份文档，在正文末尾追加一行 {note}，保存后读回确认已经写入",
+  "params": {
+    "demo": { "note": "yodo 测试行" },
+    "test": [
+      { "note": "第二组参数测试" },
+      { "note": "任务集验证写入" }
+    ]
+  },
+  "check": "读回的内容末尾包含 {note}，且是追加而非覆盖原有内容"
+}

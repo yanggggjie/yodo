@@ -1,10 +1,5 @@
 export { connectChrome, disconnectChrome } from "./session.ts";
 export type { CdpBrowser, CdpContext, CdpPage, RawCdpConnection } from "./session.ts";
-export { closeTargetsKeepChrome } from "./session.ts";
-export {
-  PAGE_AUTO_ATTACH,
-  isChromeUiUrl,
-  setDiscoverTargets,
-  setIgnoreCertificateErrors,
-  setPageAutoAttach,
-} from "./session.ts";
+export { closeTargetsKeepChrome, isChromeUiUrl } from "./session.ts";
+export { ExtensionLink, setActiveLink, frame, parseFrames } from "./extension.ts";
+export type { TabOps } from "./extension.ts";
