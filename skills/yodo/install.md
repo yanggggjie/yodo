@@ -37,7 +37,7 @@ node <安装目录>/setup.js
 
 先自己确认 `setup.js` 输出的扩展目录里有 `manifest.json`，不要把文件清单念给用户。
 
-**第一次安装**，用 `node -p process.platform` 判断系统，把 `<扩展目录>` 换成 `setup.js` 输出的绝对路径，只对用户说对应系统的那一套：
+**扩展没连上（默认）**：在 `setup.js` 之后运行 `~/.yodo/bin/yodo doctor`，只要扩展没连上，就按这一套来。包括从 v1 升级的用户：v1 没有扩展，等于第一次安装。不要凭「已有 `~/.yodo`」判断扩展装过。用 `node -p process.platform` 判断系统，把 `<扩展目录>` 换成 `setup.js` 输出的绝对路径，只对用户说对应系统的那一套：
 
 macOS（`darwin`）：
 
@@ -60,7 +60,7 @@ Linux（`linux`）：
 > 2. 点「加载已解压的扩展程序」，按 `Ctrl+L`，粘贴 `<扩展目录>`，回车，再点「选择」
 > 3. 完成后告诉我「好了」
 
-**已经加载过（升级）**：只说「请在 `chrome://extensions` 里点 yodo 扩展卡片上的刷新，完成后告诉我『好了』」。
+**扩展已连上、仅版本不同（`extension-build` 提示）**：只说「请在 `chrome://extensions` 里点 yodo 扩展卡片上的刷新，完成后告诉我『好了』」。
 
 以下是给 agent 的背景，不要讲给用户：
 
