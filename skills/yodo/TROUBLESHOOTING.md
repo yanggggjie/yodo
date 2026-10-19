@@ -56,4 +56,4 @@ yodo 完全以原始源码分发：`~/.yodo` 是 skill 目录的原样镜像（�
 
 - `~/.yodo/scripts/dev/` 随源码分发：`record.mjs` 起夹具、录制、模拟演示；`replay.mjs` 用 dev 模式保存的原始事件离线重放流水线（不需要 Chrome）。用法见 `AGENTS.md` 2.3。需要先 `touch ~/.yodo/session/dev` 开启 dev，用完 `rm ~/.yodo/session/dev`。
 - dev 模式保存的原始事件是脱敏**之前**的数据，可能含密码和 token，只写在 `~/.yodo/dev/`。用完 `rm -rf ~/.yodo/dev`，不要发给别人，也不要放进 `~/.yodo/record`。
-- 仓库根目录的 `scripts/`（`verify-pack`、`dev-install`）和 `README.md`、`brand/`、`bench/` 不分发；需要它们请 clone 仓库。
+- 仓库根目录的 `tools/`（`verify-pack`、`dev-install`）和 `README.md`、`brand/`、`bench/` 不分发；需要它们请 clone 仓库。

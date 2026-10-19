@@ -95,7 +95,7 @@ skills/yodo/
 └── TROUBLESHOOTING.md
 ```
 
-`setup.js` 把整个目录镜像到 `~/.yodo`（只排除 `node_modules`、`.DS_Store`），然后在 `~/.yodo/src` 里 `npm install`。仓库根目录的 `scripts/`（`verify-pack`、`export-payload`、`dev-install`）、`README.md`、`brand/`、`bench/` 只在仓库里，不分发。文档只在 `skills/yodo/` 里维护一份，不要在别处复制。`npm run dev:install` 和 `verify:pack` 都先用 `git ls-files` 导出文件再安装，保证本地安装与在线安装内容一致。
+`setup.js` 把整个目录镜像到 `~/.yodo`（只排除 `node_modules`、`.DS_Store`），然后在 `~/.yodo/src` 里 `npm install`。规则：`skills/yodo/` 里的都分发（其中的 `scripts/` 是产品的一部分），仓库根目录的都只在仓库里：`tools/`（`verify-pack`、`export-payload`、`dev-install`，依赖 git 和仓库根）、根 `package.json`（只放命令入口，没有版本号）、`README.md`、`brand/`、`bench/`。文档只在 `skills/yodo/` 里维护一份，不要在别处复制。`npm run dev:install` 和 `verify:pack` 都先用 `git ls-files` 导出文件再安装，保证本地安装与在线安装内容一致。
 
 不要将 `node_modules` 提交到 git 或放入 payload。用户或 agent 运行 `setup.js` 时，才在 `~/.yodo/src` 本地执行 `npm install`。
 
@@ -110,7 +110,7 @@ skills/yodo/
 
 用户明确要求“发布分支”时，创建 `release/vX.Y.Z`，不修改 `main`，也不 push。然后：
 
-1. 把本次版本号改成一致：根 `package.json`、`skills/yodo/src/package.json`，以及 `skills/yodo/src/package-lock.json` 里 yodo 包自己的 `version`。
+1. 把本次版本号改成一致：`skills/yodo/src/package.json`，以及 `skills/yodo/src/package-lock.json` 里 yodo 包自己的 `version`（两处）。根 `package.json` 没有版本号。
 2. 把本次发布里用户能感知的变化写入 README 的「2.3 更新记录」，版本号与上面相同。
 
 完成后停下来，等用户测试和检查。用户自己 push。

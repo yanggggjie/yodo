@@ -1,6 +1,5 @@
 {
   "name": "yodo-skill-repo",
-  "version": "2.0.1",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -8,8 +7,8 @@
   "scripts": {
     "check": "npm --prefix skills/yodo/src run check",
     "test": "npm --prefix skills/yodo/src run test",
-    "dev:install": "node scripts/dev-install.mjs",
-    "verify:pack": "node scripts/verify-pack.mjs"
+    "dev:install": "node tools/dev-install.mjs",
+    "verify:pack": "node tools/verify-pack.mjs"
   },
   "engines": {
     "node": ">=24"
