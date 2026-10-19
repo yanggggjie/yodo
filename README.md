@@ -99,7 +99,6 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 
 - 源码分发更彻底：安装后整个 skill 目录（源码、测试、开发脚本、架构与排障文档）原样放在 `~/.yodo`，遇到问题可以直接让 agent 读源码并修复；新增「2.2 遇到问题」。
 - 安装更稳：从 v1 升级的用户（v1 没有扩展）会得到完整的扩展加载步骤；升级后自动检查旧的位置参数 task，并提示清理 v1 遗留目录和旧名字的 skill。
-- `yodo run` 遇到没有声明 `@param` 的旧 task 时，报错里直接提示怎么改成具名参数。
 - 登录失效时，agent 会提醒你重新登录对应网站，task 本身只报状态码。
 - 本地安装（`npm run dev:install`）改为按 git 认的文件导出，与在线安装内容一致。
 

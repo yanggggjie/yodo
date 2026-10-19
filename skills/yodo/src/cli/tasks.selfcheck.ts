@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { checkParams, headerTags, legacyParamHint, invokeTaskFile, paramSpecs, parseCliParams, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
+import { checkParams, headerTags, invokeTaskFile, paramSpecs, parseCliParams, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 import { TASK_TIMEOUT_MS } from "../utils/constants.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yodo-tasks-"));
@@ -62,13 +62,6 @@ try {
   assert.deepEqual(parseCliParams(["--empty="]), { params: { empty: "" } }, "--名字= 表示空字符串");
   assert.ok("error" in parseCliParams(["pos"]));
   assert.ok("error" in parseCliParams(["--a", "1", "--a", "2"]));
-  // v1 的 task 没有 @param：报错里提示改写；声明了 @param 的不提示
-  const legacy = path.join(dir, "legacy.js");
-  fs.writeFileSync(legacy, "console.log(process.argv[2]);\n");
-  assert.match(checkParams(legacy, { q: "1" })!, /没有声明 @param.*SKILL\.md/);
-  assert.match(legacyParamHint(legacy), /具名参数/);
-  assert.equal(legacyParamHint(tricky), "");
-  assert.doesNotMatch(checkParams(tricky, { x: "1" })!, /没有声明 @param/);
   const noHeader = path.join(dir, "plain.js");
   fs.writeFileSync(noHeader, "// @status: draft\nconsole.log(1);\n");
   assert.equal(taskSummary(noHeader).status, "verified", "没有块注释头部时按 verified");
