@@ -38,7 +38,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 - 超时分两层：单个步骤（`evaluate`、`goto`、`waitForSelector`、`expectRequest`）默认最长 30 秒；整个 task 默认最长 90 秒。超时会被终止并按失败返回，错误里会说明是哪一层。`yodo eval` 对每个内层 task 单独计时。
 - `yodo eval` 中某个内层 task 失败时，还会带 `failedTask`，值为该 task 名。
 - task 里 `console.log` 等输出会出现在 stderr，不影响 stdout 的 JSON 和退出码。不要大量打印，stderr 的内容也会进入你的上下文。
-- 输出 `need-install`、`need-chrome` 或 `need-extension` 时，把 `guide` 原样告诉用户，等待用户回复「好了」，然后重新运行同一条命令。不要改写 `guide`，不要轮询。
+- 输出 `need-install`、`need-chrome` 或 `need-extension` 时，`guide` 只是一句状态说明。按 `~/.yodo/TROUBLESHOOTING.md` 的「安装」「扩展与连接」处理；需要用户做的操作，用一句话告诉用户，等用户回复「好了」，然后重新运行同一条命令。不要轮询。
 - `result` 只包含用户要求的内容。原始接口响应、整段 HTML、完整列表只能在 task 内部用于取值。
 
 ## 4. 录制与学习
