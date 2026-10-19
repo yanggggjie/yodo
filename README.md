@@ -3,7 +3,9 @@
 > [!NOTE]
 > **You only do once：只需要你演示一次。**
 
-yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 同类。它使用你本机已登录的 Google Chrome，新任务只需演示一次，学会后直接运行脚本，**更快、token 更省**。
+yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 同类。
+
+它使用你本机已登录的 Google Chrome，新任务只需演示一次，学会后直接运行脚本，**更快、token 更省**。
 
 <a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
   <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="360">
