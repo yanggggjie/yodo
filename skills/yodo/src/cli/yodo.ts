@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { ensureSessionAndRpc, restartDaemon } from "./session.ts";
 import { handleDoctor } from "./doctor.ts";
 import { runEval } from "./compose.ts";
-import { checkParams, invokeTaskFile, parseCliParams, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
+import { checkParams, invokeTaskFile, legacyParamHint, parseCliParams, taskFile, taskOutput, taskSummary, taskTimeoutMs } from "./tasks.ts";
 import { writeRunHistory } from "../run-history.ts";
 import { formatErrorStdout, formatHandshakeStdout, isHandshakeStatus } from "../protocol.ts";
 import { assertNode24 } from "../utils/node.ts";
@@ -45,7 +45,7 @@ function runTask(name: string, args: string[]): void {
   const file = taskFile(TASK_DIR, name);
   if (!fs.existsSync(file)) return fail(`task 不存在：${name}`);
   const parsed = parseCliParams(args);
-  if ("error" in parsed) return fail(`[${name}] ${parsed.error}`);
+  if ("error" in parsed) return fail(`[${name}] ${parsed.error}${legacyParamHint(file)}`);
   const params = parsed.params;
   const problem = checkParams(file, params);
   if (problem) return fail(`[${name}] ${problem}`);

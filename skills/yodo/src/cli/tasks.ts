@@ -69,11 +69,16 @@ export function parseCliParams(args: string[]): { params: Record<string, string>
 }
 
 /** 对照文件头的 @param 检查：缺必填、传了没声明的参数都返回说明；通过返回 undefined。 */
+/** 旧版（v1）task 靠位置参数，没有 @param：报错时提示怎么改。 */
+export function legacyParamHint(file: string): string {
+  return paramSpecs(file).length === 0 ? "；这个 task 没有声明 @param，旧版 task 请按 SKILL.md 改成具名参数（文件头 @param + yodo.params.名字）" : "";
+}
+
 export function checkParams(file: string, params: Record<string, string>): string | undefined {
   const specs = paramSpecs(file);
   const known = new Set(specs.map((spec) => spec.name));
   const unknown = Object.keys(params).filter((name) => !known.has(name));
-  if (unknown.length) return `没有这些参数：${unknown.map((name) => `--${name}`).join("、")}；可用：${specs.map((spec) => `--${spec.name}`).join("、") || "（无）"}`;
+  if (unknown.length) return `没有这些参数：${unknown.map((name) => `--${name}`).join("、")}；可用：${specs.map((spec) => `--${spec.name}`).join("、") || "（无）"}${legacyParamHint(file)}`;
   const missing = specs.filter((spec) => !spec.optional && !(spec.name in params));
   if (missing.length) return `缺少必填参数：${missing.map((spec) => `--${spec.name}（${spec.description}）`).join("、")}`;
   return undefined;
