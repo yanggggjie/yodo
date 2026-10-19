@@ -105,7 +105,7 @@ skills/yodo/
 用户明确要求“发布分支”时，创建 `release/vX.Y.Z`，不修改 `main`，也不 push。然后：
 
 1. 把本次版本号改成一致：根 `package.json`、`skills/yodo/src/package.json`，以及 `skills/yodo/src/package-lock.json` 里 yodo 包自己的 `version`。
-2. 把本次发布里用户能感知的变化写入 README 的「2.2 更新记录」，版本号与上面相同。
+2. 把本次发布里用户能感知的变化写入 README 的「2.3 更新记录」，版本号与上面相同。
 
 完成后停下来，等用户测试和检查。用户自己 push。
 
