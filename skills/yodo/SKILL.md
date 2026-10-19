@@ -140,7 +140,6 @@ yodo eval 'const list = await task("x-search-recent", { keyword: "claude", count
 - 新写或修改的 task 先标记 `@status: draft`，运行成功后改为 `verified`。
 - `~/.yodo/task` 中没有 `@status` 的脚本视为 `verified`。
 - 同一个 task 失败后没有新证据时，不要反复运行。
-- yodo 的全部源码在 `~/.yodo/src`，架构说明在 `~/.yodo/ARCHITECTURE.md`，常见故障与修复在 `~/.yodo/TROUBLESHOOTING.md`，开发脚本在 `~/.yodo/scripts`。运行出错、`yodo doctor` 报失败时先读它们，可以直接读源码定位并修复。
 - task 失败后，先看报错里的状态码和页面是否像登录失效（401/403、跳到登录页）。是的话告诉用户「请在 Chrome 里重新登录 <网站>」，等用户回复后再重试一次；不要改 task，也不要反复运行。
 
 ## 7. 对用户
@@ -148,3 +147,9 @@ yodo eval 'const list = await task("x-search-recent", { keyword: "claude", count
 - 只说明要做的操作、需要用户完成的步骤和最终结果。
 - 需要用户演示或登录时，直接说明要做什么。
 - 不向用户暴露 task 结构、文件路径或内部状态。
+
+## 8. 遇到问题
+
+以下是给 agent 的，不要讲给用户。
+
+yodo 完全以源码分发。遇到问题先到 `~/.yodo` 里找答案：`TROUBLESHOOTING.md` 是故障表，`ARCHITECTURE.md` 说明各部分怎么工作，`src/` 是全部源码，开发脚本在 `scripts/`。可以直接读、直接改源码来定位和修复；改动会在下次升级时被覆盖。`yodo doctor` 报失败时也从这里开始。

@@ -107,6 +107,6 @@ Linux（`linux`）：
 
 以下是给 agent 的背景，不要讲给用户：
 
-- yodo 完全以原始源码分发，没有编译产物。安装后 `~/.yodo` 是 skill 目录的原样镜像：源码在 `~/.yodo/src`，开发脚本在 `~/.yodo/scripts/dev`，架构在 `~/.yodo/ARCHITECTURE.md`，开发约定在 `~/.yodo/AGENTS.md`，常见故障与修复在 `~/.yodo/TROUBLESHOOTING.md`。安装、升级、迁移中遇到任何问题，先读它们，可以直接读源码定位并修复，不必等用户指点。
+- yodo 完全以源码分发，没有编译产物。遇到问题先到 `~/.yodo` 里找答案：`TROUBLESHOOTING.md` 是故障表，`ARCHITECTURE.md` 说明各部分怎么工作，`AGENTS.md` 是开发约定，`src/` 是全部源码，开发脚本在 `scripts/dev`。安装、升级、迁移中遇到任何问题，都可以直接读源码定位并修复，不必等用户指点。
 - 在线安装失败时，可以 clone 仓库后在仓库根目录运行 `npm run dev:install`，效果与在线安装相同。
 - 直接改 `~/.yodo/src` 只是临时修复，下次升级会被覆盖；修复有普遍价值时告诉用户可以提 issue 或 PR。
