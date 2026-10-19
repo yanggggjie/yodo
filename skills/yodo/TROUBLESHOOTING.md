@@ -32,7 +32,7 @@ yodo 完全以原始源码分发：`~/.yodo` 是 skill 目录的原样镜像（�
 | `yodo daemon restart` 提示正忙 | 有 run 或录制在进行，结束后再运行 |
 | 升级后旧 daemon 还在跑 | `setup.js` 会提示；运行 `yodo daemon restart` |
 | 从 v1 升级：`yodo run` 报「位置参数」或「没有这些参数」 | v2 参数一律具名。在 task 文件头加 `@param 名字 说明`（可选参数写 `名字?`），代码里把 `process.argv` 换成 `yodo.params.名字`（值都是字符串）。调用时写 `--名字 值`。详见 `SKILL.md` |
-| 升级后留下的 `~/.yodo/temp`、`~/.yodo/backup`，旧名字的 skill | 处理方式见 `install.md`「清理 v1 遗留」，里面可能有用户想保留的内容，不要直接删 |
+| 升级后留下的 `~/.yodo/temp`、`~/.yodo/backup` | 处理方式见 `install.md`「清理 v1 遗留」，里面可能有用户想保留的内容，不要直接删 |
 | task 文件在哪 | `~/.yodo/task/<name>.js`，直接改它；升级不会碰 `task/`，但会重写 `task/lib/` |
 
 ## 4. 运行

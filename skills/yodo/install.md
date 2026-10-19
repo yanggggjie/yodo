@@ -93,8 +93,6 @@ Linux（`linux`）：
 - `~/.yodo/temp`：v1 的候选 task 目录。先看里面有没有 `.js` 文件；有的是未验证的草稿，请用户决定保留（移到 `~/.yodo/task`，文件头加 `@status: draft`）还是丢弃；只剩 `package.json` 时才可以直接删。
 - `~/.yodo/backup`：v1 升级迁移前自动创建的 task 备份。只对用户说一句有旧备份，由用户决定是否删除，agent 不主动删。
 
-**旧名字的 skill**：`npx skills ls -g` 里如果还有 `yodo-browser-skill`，对用户说一句「检测到旧版 skill yodo-browser-skill，建议删除」，用户同意后再运行 `npx skills remove`。
-
 ## 7. 报告
 
 只告诉用户：
