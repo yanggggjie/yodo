@@ -27,6 +27,8 @@ const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js"
 copyRuntime(SRC, DEST);
 fs.copyFileSync(path.join(HERE, "LICENSE"), path.join(DEST, "LICENSE"));
 console.log(`yodo src 拷贝 → ${DEST}`);
+// 文档随源码分发：架构与开发约定、排障，放在 ~/.yodo 下（不进 src，改文档不改变运行时 build）。
+for (const doc of ["AGENTS.md", "TROUBLESHOOTING.md"]) fs.copyFileSync(path.join(HERE, doc), path.join(path.dirname(DEST), doc));
 
 const lock = path.join(DEST, "package-lock.json");
 if (!fs.existsSync(lock)) {

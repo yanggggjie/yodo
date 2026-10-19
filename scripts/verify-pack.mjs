@@ -55,6 +55,8 @@ try {
     "src/store/deploy.ts",
     "src/templates/task-lib/index.js",
     "src/templates/task-lib/url.js",
+    "AGENTS.md",
+    "TROUBLESHOOTING.md",
     "src/package.json",
     "src/package-lock.json",
   ]) {
@@ -69,6 +71,7 @@ try {
   const dest = path.join(HOME, ".yodo", "src");
   assert.ok(fs.existsSync(path.join(dest, "sdk.ts")), "~/.yodo/src 未建好");
   assert.ok(fs.existsSync(path.join(dest, "LICENSE")), "setup 后缺 LICENSE");
+  for (const doc of ["AGENTS.md", "TROUBLESHOOTING.md"]) assert.ok(fs.existsSync(path.join(dest, "..", doc)), `setup 后缺 ~/.yodo/${doc}`);
   // 部署的只有运行时代码：没有自检和夹具；有 .version（daemon 和扩展的版本检测靠它）；dev/rpc.ts 被 holder 静态 import，要在
   assert.ok(!fs.existsSync(path.join(dest, "record", "fixtures")), "部署目录里不应有 record/fixtures");
   assert.ok(!fs.existsSync(path.join(dest, "record", "dom.selfcheck.ts")), "部署目录里不应有 *.selfcheck.*");
