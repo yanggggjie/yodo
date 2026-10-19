@@ -29,7 +29,7 @@
 node <安装目录>/setup.js
 ```
 
-脚本依次完成：拷贝运行时到 `~/.yodo/src`，安装依赖，注册 native messaging host，生成 `~/.yodo/bin/yodo` 与 `yodo.cmd`，创建 `~/.yodo/task` 与 `~/.yodo/record`，最后运行 `doctor`。
+脚本依次完成：把 skill 目录原样镜像到 `~/.yodo`（含 `src`、`scripts`、文档），在 `~/.yodo/src` 安装依赖，注册 native messaging host，生成 `~/.yodo/bin/yodo` 与 `yodo.cmd`，创建 `~/.yodo/task` 与 `~/.yodo/record`，最后运行 `doctor`。
 
 ## 4. 加载或刷新 Chrome 扩展（需要用户操作）
 
@@ -80,9 +80,22 @@ Linux（`linux`）：
 - `extension-build` 提示扩展版本不同或没有报告版本：对用户只说「请在 `chrome://extensions` 里刷新 yodo 扩展」，然后重新运行 `doctor`。
 - 其它失败：按 `doctor` 输出的修复命令自己处理，再重新运行 `doctor`；处理不了时，对用户说清需要他做的一件事。
 
-通过后可以自己做冒烟测试（例如 `yodo run` 列出 task、跑一个只读 task）。
+通过后进入第 6 步（旧数据检查）。可以自己做冒烟测试（例如 `yodo run` 列出 task、跑一个只读 task）。
 
-## 6. 报告
+## 6. 升级后的检查
+
+仅在 `~/.yodo` 里已有旧数据时做。静默完成，不向用户罗列文件和目录；只有需要用户做决定时才说一句话。
+
+**旧 task**：读 `~/.yodo/task/*.js` 的文件头。没有 `@param`、却读 `process.argv` 的，是 v1 的位置参数 task：按 `SKILL.md` 改成具名参数（文件头加 `@param 名字 说明`，代码里用 `yodo.params.名字`）。只改这些 task。不要为了验证去运行有副作用的 task。
+
+**清理 v1 遗留**：v2 只用 `task`、`record`、`run`、`session`、`bin`、`src`。
+
+- `~/.yodo/temp`：v1 的候选 task 目录。先看里面有没有 `.js` 文件；有的是未验证的草稿，请用户决定保留（移到 `~/.yodo/task`，文件头加 `@status: draft`）还是丢弃；只剩 `package.json` 时才可以直接删。
+- `~/.yodo/backup`：v1 升级迁移前自动创建的 task 备份。只对用户说一句有旧备份，由用户决定是否删除，agent 不主动删。
+
+**旧名字的 skill**：`npx skills ls -g` 里如果还有 `yodo-browser-skill`，对用户说一句「检测到旧版 skill yodo-browser-skill，建议删除」，用户同意后再运行 `npx skills remove`。
+
+## 7. 报告
 
 只告诉用户：
 
@@ -94,6 +107,6 @@ Linux（`linux`）：
 
 以下是给 agent 的背景，不要讲给用户：
 
-- yodo 完全以原始源码分发，没有编译产物。安装后：源码在 `~/.yodo/src`，架构与约定在 `~/.yodo/AGENTS.md`，常见故障与修复在 `~/.yodo/TROUBLESHOOTING.md`。安装、升级、迁移中遇到任何问题，先读它们，可以直接读源码定位并修复，不必等用户指点。
+- yodo 完全以原始源码分发，没有编译产物。安装后 `~/.yodo` 是 skill 目录的原样镜像：源码在 `~/.yodo/src`，开发脚本在 `~/.yodo/scripts/dev`，架构在 `~/.yodo/ARCHITECTURE.md`，开发约定在 `~/.yodo/AGENTS.md`，常见故障与修复在 `~/.yodo/TROUBLESHOOTING.md`。安装、升级、迁移中遇到任何问题，先读它们，可以直接读源码定位并修复，不必等用户指点。
 - 在线安装失败时，可以 clone 仓库后在仓库根目录运行 `npm run dev:install`，效果与在线安装相同。
 - 直接改 `~/.yodo/src` 只是临时修复，下次升级会被覆盖；修复有普遍价值时告诉用户可以提 issue 或 PR。
