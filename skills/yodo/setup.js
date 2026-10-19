@@ -1,4 +1,4 @@
-// yodo bootstrap：把本 skill 的 src/ 拷到 .yodo/src，再 npm install，然后建数据目录。
+// yodo bootstrap：把本 skill 目录整个镜像到 ~/.yodo（src、scripts、文档），再在 ~/.yodo/src 里 npm install，然后建数据目录。
 // 用户/agent 的脚本在 .yodo/{task,temp}，本脚本永不碰。
 // 用法：node <此 skill 目录>/setup.js
 import * as fs from "node:fs";
@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { copyRuntime } from "./src/store/deploy.ts";
+import { mirrorPayload } from "./src/store/deploy.ts";
 import { writeVersion } from "./src/store/version.ts";
 import { restartDaemon, tryPing } from "./src/cli/session.ts";
 import { writeShim, BIN_DIR } from "./src/cli/shim.ts";
@@ -20,15 +20,12 @@ if (!Number.isFinite(major) || major < 24) {
 }
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(HERE, "src");
-const DEST = path.join(os.homedir(), ".yodo", "src");
+const HOME_DIR = path.join(os.homedir(), ".yodo");
+const DEST = path.join(HOME_DIR, "src");
 const DEPS_MARKER = path.join("node_modules", "tldts", "dist", "cjs", "index.js");
 
-copyRuntime(SRC, DEST);
-fs.copyFileSync(path.join(HERE, "LICENSE"), path.join(DEST, "LICENSE"));
-console.log(`yodo src 拷贝 → ${DEST}`);
-// 文档随源码分发：架构与开发约定、排障，放在 ~/.yodo 下（不进 src，改文档不改变运行时 build）。
-for (const doc of ["AGENTS.md", "TROUBLESHOOTING.md"]) fs.copyFileSync(path.join(HERE, doc), path.join(path.dirname(DEST), doc));
+mirrorPayload(HERE, HOME_DIR);
+console.log(`yodo 源码镜像 → ${HOME_DIR}`);
 
 const lock = path.join(DEST, "package-lock.json");
 if (!fs.existsSync(lock)) {

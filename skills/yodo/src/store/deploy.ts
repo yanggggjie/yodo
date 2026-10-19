@@ -15,7 +15,7 @@ export function safeRemove(p: string): void {
 
 /**
  * 哪些路径算运行时代码：排除 node_modules、自检（*.selfcheck.*）和夹具（fixtures/）。
- * 部署拷贝和版本哈希用同一条规则，不然测试文件的改动会触发不必要的重启。
+ * 只用于版本哈希：整个 skill 目录都会镜像到本机，但改自检、夹具不该触发重启 daemon。
  */
 export function isRuntimePath(root: string, p: string): boolean {
   const rel = path.relative(root, p);
@@ -25,12 +25,27 @@ export function isRuntimePath(root: string, p: string): boolean {
   return !/\.selfcheck\./.test(parts[parts.length - 1]!);
 }
 
-/** 把 srcAbs 的运行时代码拷到 destAbs（规则见 isRuntimePath）。先清空 dest。 */
-export function copyRuntime(srcAbs: string, destAbs: string): void {
-  safeRemove(destAbs);
-  fs.mkdirSync(path.dirname(destAbs), { recursive: true });
-  fs.cpSync(srcAbs, destAbs, {
-    recursive: true,
-    filter: (src) => isRuntimePath(srcAbs, src),
-  });
+/** 镜像时跳过的路径：依赖在本机安装，.DS_Store 是系统杂物。 */
+export function isMirrorPath(root: string, p: string): boolean {
+  const parts = path.relative(root, p).split(path.sep);
+  return !parts.includes("node_modules") && parts[parts.length - 1] !== ".DS_Store";
+}
+
+/**
+ * 把 skill 的整个目录镜像到 homeAbs（~/.yodo）：顶层文件直接覆盖，顶层目录（src、scripts）先清空再拷。
+ * 只动 payload 里有的名字，不碰 task、record、run、session、bin 这些本机数据。
+ */
+export function mirrorPayload(payloadAbs: string, homeAbs: string): void {
+  fs.mkdirSync(homeAbs, { recursive: true });
+  for (const entry of fs.readdirSync(payloadAbs, { withFileTypes: true })) {
+    const from = path.join(payloadAbs, entry.name);
+    const to = path.join(homeAbs, entry.name);
+    if (!isMirrorPath(payloadAbs, from)) continue;
+    if (entry.isDirectory()) {
+      safeRemove(to);
+      fs.cpSync(from, to, { recursive: true, filter: (p) => isMirrorPath(payloadAbs, p) });
+    } else if (entry.isFile()) {
+      fs.copyFileSync(from, to);
+    }
+  }
 }

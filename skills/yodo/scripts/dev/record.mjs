@@ -1,4 +1,4 @@
-// 用法：node scripts/dev/record.mjs [场景.mjs]
+// 用法：node <skill 目录>/scripts/dev/record.mjs（本机是 ~/.yodo/scripts/dev/record.mjs） [场景.mjs]
 // 起夹具 → record.start → 场景里用 Driver 模拟用户操作 → record.stop → 打印汇总，并与上一次比较。需要 dev 已开启。
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { startFixture } from "./fixture.mjs";
 import { compareWithLast, printStages } from "./diff.mjs";
 
-const src = fileURLToPath(new URL("../../skills/yodo/src/", import.meta.url));
+const src = fileURLToPath(new URL("../../src/", import.meta.url));
 const { sessionRpc } = await import(pathToFileURL(path.join(src, "cli/rpc.ts")));
 const { findPage } = await import(pathToFileURL(path.join(src, "dev/driver.ts")));
 
