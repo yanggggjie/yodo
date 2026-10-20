@@ -97,7 +97,7 @@ def main():
             f"{fastest[1] / ROWS[0][1]:.1f}×", f"比 {fastest[0]} 快", note),
         "cost.svg": chart(
             "花费", "越低越好", dollars, [f"${d:.2f}" for d in dollars],
-            f"{cheapest[2] / ROWS[0][2]:.1f}×", f"比 {cheapest[0]} 便宜", note),
+            f"−{(1 - ROWS[0][2] / cheapest[2]) * 100:.0f}%", f"比 {cheapest[0]} 少花", note),
     }
     for name, svg in outputs.items():
         path = os.path.join(HERE, name)

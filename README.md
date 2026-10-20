@@ -29,7 +29,9 @@ yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-
 | `browser-use` | 是 | 9 分 45 秒 | $0.93 |
 | `yodo (learn)` | 是 | 6 分 46 秒 | $0.83 |
 
-<img src="bench/time.svg" alt="耗时" width="410"> <img src="bench/cost.svg" alt="花费" width="410">
+<img src="bench/time.svg" alt="耗时" width="560">
+
+<img src="bench/cost.svg" alt="花费" width="560">
 
 `yodo (run)` 是运行已学会的脚本，`yodo (learn)` 是演示后学习并完成任务；学习只需一次。数据在 v1.2.0 上测得，v2 未重测，每种方式只测一次。分析与复现方法见 [bench/README.md](bench/README.md)。
 
