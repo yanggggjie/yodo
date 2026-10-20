@@ -106,6 +106,11 @@ async function dispatch(req: JsonRpcRequest, conn: ConnState): Promise<unknown> 
         throw error;
       }
     }
+    case "run.openPage": {
+      if (!conn.runActive) throw new Error("run.openPage 只能在 run 中使用");
+      const page = await context!.openRunPage();
+      return { pageId: page.targetId };
+    }
     case "run.end": await runEnd(conn); return {};
     case "cdp.send": {
       if (!conn.runActive) throw new Error("cdp.send 只能在 run 中使用");

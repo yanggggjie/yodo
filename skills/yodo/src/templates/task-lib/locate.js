@@ -9,18 +9,14 @@ const POLL_MS = 200;
 
 export const describeTarget = (target) => (typeof target === "string" ? target : `${target.role} "${target.name}"`);
 
-/**
- * 在页面里执行 fn(el, ...args)，el 是 objectId 对应的元素。返回 fn 的结果，异常直接抛出。
- * userGesture：动作（click 等）算用户操作，否则 target=_blank 会被弹窗拦截；只读查询不带，见 page.js 的 query。
- */
-async function callFunction(page, objectId, userGesture, fn, args) {
+/** 在页面里执行 fn(el, ...args)，el 是 objectId 对应的元素。返回 fn 的结果，异常直接抛出。不带 userGesture，见 page.js 的 evaluate。 */
+export async function callOn(page, objectId, fn, ...args) {
   const response = await page.cdp.send("Runtime.callFunctionOn", {
     objectId,
     functionDeclaration: `function (...args) { return (${fn.toString()})(this, ...args); }`,
     arguments: args.map((value) => ({ value })),
     returnByValue: true,
     awaitPromise: true,
-    userGesture,
   });
   if (response.exceptionDetails) {
     throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "DOM 操作失败");
@@ -68,7 +64,7 @@ export async function locate(page, target, { timeout = ACTION_TIMEOUT_MS } = {})
   for (;;) {
     const objectId = await findOnce(page, target);
     if (objectId) {
-      if (await callFunction(page, objectId, false, isActionable, [])) return objectId;
+      if (await callOn(page, objectId, isActionable)) return objectId;
       reason = "找到了，但不可见或已禁用";
     }
     if (Date.now() - started >= timeout) {
@@ -78,20 +74,11 @@ export async function locate(page, target, { timeout = ACTION_TIMEOUT_MS } = {})
   }
 }
 
-/** 定位 + 执行 + 释放。动作用它（带 userGesture）。 */
+/** 定位 + 执行 + 释放。 */
 export async function withElement(page, target, options, fn, ...args) {
-  return onElement(page, target, options, true, fn, args);
-}
-
-/** 定位 + 只读查询 + 释放（不带 userGesture），check、toggle 读当前状态用。 */
-export async function readElement(page, target, options, fn, ...args) {
-  return onElement(page, target, options, false, fn, args);
-}
-
-async function onElement(page, target, options, userGesture, fn, args) {
   const objectId = await locate(page, target, options);
   try {
-    return await callFunction(page, objectId, userGesture, fn, args);
+    return await callOn(page, objectId, fn, ...args);
   } finally {
     page.cdp.send("Runtime.releaseObject", { objectId }).catch(() => {});
   }

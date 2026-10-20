@@ -1,5 +1,5 @@
-import { evaluate, query, STEP_TIMEOUT_MS } from "./page.js";
-import { describeTarget, readElement, withElement } from "./locate.js";
+import { evaluate, STEP_TIMEOUT_MS } from "./page.js";
+import { describeTarget, withElement } from "./locate.js";
 
 // ponytail: these helpers dispatch DOM events directly (no pointer coordinates).
 // Sliders, clientX menus, and editor-owned documents need a task-level evaluate.
@@ -55,7 +55,7 @@ export async function scroll(page, selector, { deltaX = 0, deltaY = 0 }) {
 }
 
 export async function check(page, target, checked, options) {
-  const current = await readElement(page, target, options, (element) => {
+  const current = await withElement(page, target, options, (element) => {
     if (!(element instanceof HTMLInputElement) || !/^(checkbox|radio)$/.test(element.type)) throw new Error("DOM check target is not a checkbox or radio");
     return element.checked;
   });
@@ -86,7 +86,7 @@ export async function waitForSelector(page, selector, options = {}) {
   const state = options.state ?? "visible";
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   for (;;) {
-    const found = await query(page, (input) => {
+    const found = await evaluate(page, (input) => {
       const element = document.querySelector(input.selector);
       if (!(element instanceof Element)) return false;
       if (input.state === "attached") return true;
@@ -110,7 +110,7 @@ function defaultIsOn(el) {
 export async function toggle(page, target, { target: wanted, isOn, ...options } = {}) {
   if (typeof wanted !== "boolean") throw new Error("toggle 需要 { target: true | false }");
   const source = (isOn ?? defaultIsOn).toString();
-  const current = await readElement(page, target, options, (element, fnSource) => Boolean(new Function(`return (${fnSource})`)()(element)), source);
+  const current = await withElement(page, target, options, (element, fnSource) => Boolean(new Function(`return (${fnSource})`)()(element)), source);
   if (current === wanted) return "already";
   await click(page, target, options);
   return "done";

@@ -1,7 +1,8 @@
 /**
  * dev Driver：在录制窗口里模拟用户操作。设计与约束见 AGENTS.md 2.3。
  * 全部是页面内的 DOM 操作（Runtime.evaluate），不使用 Input 域；录制器记录所有页面事件，不做区分。
- * 操作类脚本带 userGesture:true（不然 target=_blank 的点击会被弹窗拦截），事件本身仍是脚本合成的。
+ * 默认不带 userGesture：页面自发的弹窗会被浏览器拦住，不会开新标签抢前台。确实要模拟会打开新标签的用户操作时，
+ * 显式用 page.eval(表达式, true)（widgets 用例的 --popups）。
  * 只用 Runtime.evaluate、Page.navigate、Page.handleJavaScriptDialog；不调用任何 *.disable。
  * 阻塞式对话框（confirm、alert）会让 evaluate 挂起：驱动在操作期间按 dialog 策略处理它。
  */
@@ -57,7 +58,7 @@ export class DevPage {
    */
   private async act(expression: string, dialog: DialogPolicy): Promise<string> {
     let settled = false;
-    const pending = this.eval<string>(expression, true).finally(() => { settled = true; });
+    const pending = this.eval<string>(expression).finally(() => { settled = true; });
     for (let waited = 0; !settled && waited < 40; waited++) {
       await sleep(100);
       if (waited >= 2) await this.cdp("Page.handleJavaScriptDialog", { accept: dialog === "accept" }).catch(() => {});

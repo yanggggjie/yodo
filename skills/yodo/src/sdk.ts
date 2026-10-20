@@ -39,7 +39,18 @@ function cdpSession(peer: RpcPeer, pageId: string): CdpSession {
   };
 }
 
-export type PageHandle = { readonly cdp: CdpSession };
+/** 一个页面（标签页）。newPage() 在 run 窗口里另开一个空白页面并返回它的句柄，run 结束时自动关闭。 */
+export type PageHandle = { readonly cdp: CdpSession; newPage(): Promise<PageHandle> };
+function pageHandle(peer: RpcPeer, pageId: string): PageHandle {
+  return {
+    cdp: cdpSession(peer, pageId),
+    async newPage() {
+      const opened = await peer.request("run.openPage") as { pageId: string };
+      return pageHandle(peer, opened.pageId);
+    },
+  };
+}
+
 export type TaskFn = (api: { page: PageHandle }) => Promise<unknown> | unknown;
 
 
@@ -78,7 +89,7 @@ export const yodo = {
       if (blocked) { const status = (blocked.data as { status?: string } | undefined)?.status; console.log(status && isHandshakeStatus(status) ? formatHandshakeStdout(status) : runFailureJson(new Error(blocked.message), scriptAbs)); process.exitCode = 1; return; }
       peer = await RpcPeer.open();
       const begun = await beginRun(peer);
-      const page: PageHandle = { cdp: cdpSession(peer, begun.pageId) };
+      const page = pageHandle(peer, begun.pageId);
       restore = consoleToStderr();
       // 监听函数抛错、连接意外断开，都会让 peer.failure 先 reject，成为这次 run 的失败
       const result = await Promise.race([fn({ page }), peer.failure]);

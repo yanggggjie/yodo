@@ -94,6 +94,7 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 - 完全以源码分发，遇到问题可让 agent 读源码修复，见「2.2 遇到问题」。
 - 从 v1 升级时给出完整的扩展加载步骤，并检查旧 task。
 - 登录失效时提醒你重新登录。
+- 运行和测试时不再弹到前台；页面要打开新窗口时，yodo 在后台窗口另开页面，task 可以继续操作它（`expectPopup`、`openPage`）。
 
 #### v2.0.0
 

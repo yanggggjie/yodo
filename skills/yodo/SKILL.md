@@ -88,7 +88,7 @@ task 里写进去的每个选择器、地址、字段、id，都要在录制材�
 SDK：
 
 ```javascript
-import { yodo, goto, evaluate, click, fill, press, toggle, expectRequest, serializeUrl } from "../task/lib/index.js";
+import { yodo, goto, evaluate, click, fill, press, toggle, expectRequest, expectPopup, openPage, serializeUrl } from "../task/lib/index.js";
 
 await yodo.run(async ({ page }) => {
   await goto(page, serializeUrl({ bareUrl: "https://example.com/search", query: { q: yodo.params.query } }));
@@ -104,6 +104,8 @@ await yodo.run(async ({ page }) => {
 - `scroll`、`waitForSelector`：页面操作，只接受 CSS 选择器。
 - `toggle(page, selector, { target: true | false })`：先读状态，已满足则返回 `already`，否则点击一次返回 `done`。有副作用的操作用它。
 - `expectRequest(page, { method, path }, action)`：执行 action，并等待它触发的请求完成，返回 `{ status, body }`（`body` 是响应文本）。会发请求的操作用它判断是否成功。没有对应请求说明操作没有生效。action 可以是 `goto`，用来接页面加载时自己发的请求（列表接口常是这样）。接口依赖页面算出来的签名、token 时没法自己复刻请求，就让页面自己发，用它接响应：接到的响应比读页面文字稳（页面文字里有"展开"之类的控件文字，列表还有懒加载）。
+- `expectPopup(page, action)`：执行 action（通常是 `click`），其间页面想打开新窗口（`window.open`、`<a target="_blank">`）时，yodo 不让页面自己开，而是在 run 窗口里另开一个页面并导航过去，返回**新页面的句柄**，之后对它同样使用 `goto`、`evaluate`、`click` 等。只接管 action 执行期间到 `timeout`（默认 10 秒）之内发生的；之后异步触发的拿不到；只支持 http(s) 地址。页面自己直接开新标签会被浏览器拦住（不会开、也不会抢前台）。
+- `openPage(page, url)`：在 run 窗口里另开一个页面并导航到 url，返回新页面的句柄。run 结束时自动关闭。
 - 不要在 task 里关闭用户已有的 tab，不要修改 holder 的状态。
 
 ### 写法

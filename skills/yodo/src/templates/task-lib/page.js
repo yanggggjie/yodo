@@ -6,20 +6,14 @@ function expressionOf(fnOrString, args) {
   return `(async () => (${fnOrString.toString()})(${args.map((arg) => JSON.stringify(arg)).join(", ")}))()`;
 }
 
-async function run(page, fnOrString, args, userGesture) {
-  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true, userGesture });
+/**
+ * 在页面内执行函数或表达式。不带 userGesture：yodo 无人值守，页面自己（或这里的脚本）调用 window.open 会被浏览器拦住，
+ * 不会弹出新标签、更不会抢前台；需要新页面用 expectPopup 或 openPage。
+ */
+export async function evaluate(page, fnOrString, ...args) {
+  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true });
   if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "evaluate failed");
   return response.result.value;
-}
-
-/** task 里用的 evaluate：可能包含点击等操作，所以算作用户操作（userGesture），target=_blank 才打得开。 */
-export async function evaluate(page, fnOrString, ...args) {
-  return run(page, fnOrString, args, true);
-}
-
-/** 库内部的只读查询（轮询等）：不带 userGesture，否则轮询会让页面一直处于被用户激活的状态，页面自己发起的弹窗也被放行。 */
-export async function query(page, fnOrString, ...args) {
-  return run(page, fnOrString, args, false);
 }
 
 /**
@@ -95,4 +89,58 @@ export async function expectRequest(page, { method, path }, action, { timeout = 
     clearTimeout(timer);
     for (const off of offs) off();
   }
+}
+
+/** 在 run 窗口里另开一个页面并导航到 url，返回新页面的句柄（run 结束时自动关闭）。 */
+export async function openPage(page, url) {
+  const next = await page.newPage();
+  await goto(next, url);
+  return next;
+}
+
+// 页面内的钩子：action 期间接管 window.open 和 <a target=_blank>，只记下目标网址，不让页面真的打开新标签。
+function installPopupHook() {
+  const state = { urls: [] };
+  const originalOpen = window.open;
+  window.open = (url) => { state.urls.push(url ? new URL(String(url), location.href).href : ""); return null; };
+  const onClick = (event) => {
+    const anchor = event.target instanceof Element ? event.target.closest("a[target=_blank]") : null;
+    if (!anchor || !anchor.href) return;
+    event.preventDefault();
+    state.urls.push(anchor.href);
+  };
+  document.addEventListener("click", onClick, true);
+  window.__yodoPopup = { state, originalOpen, onClick };
+}
+const takePopupUrl = () => window.__yodoPopup?.state.urls[0] ?? null;
+function removePopupHook() {
+  const hook = window.__yodoPopup;
+  if (!hook) return;
+  window.open = hook.originalOpen;
+  document.removeEventListener("click", hook.onClick, true);
+  delete window.__yodoPopup;
+}
+
+/**
+ * 执行 action（比如 click），其间页面想打开新窗口（window.open、<a target=_blank>）时，
+ * 不让页面自己开（会抢前台），而是由 yodo 在 run 窗口里另开一个页面并导航过去，返回新页面的句柄。
+ * 只接管 action 执行期间到 timeout 之内发生的；之后异步触发的拿不到。只支持 http(s) 地址。
+ */
+export async function expectPopup(page, action, { timeout = 10_000 } = {}) {
+  await evaluate(page, installPopupHook);
+  let url;
+  try {
+    await action();
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      url = await evaluate(page, takePopupUrl);
+      if (url !== null) break;
+      if (Date.now() >= deadline) throw new Error(`expectPopup：${timeout} 毫秒内页面没有要打开的新窗口`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } finally {
+    await evaluate(page, removePopupHook).catch(() => {});
+  }
+  if (!/^https?:/i.test(url)) throw new Error(`expectPopup：新窗口的地址不是 http(s)，无法打开：${url || "（空）"}`);
+  return openPage(page, url);
 }

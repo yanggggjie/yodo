@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { check, click, fill, press, scroll, select, toggle, waitForSelector } from "./templates/task-lib/dom.js";
-import { evaluate, goto } from "./templates/task-lib/page.js";
+import { evaluate, expectPopup, goto, openPage } from "./templates/task-lib/page.js";
 import type { PageHandle } from "./sdk.ts";
 
 const calls: string[] = [];
 const expressions: string[] = [];
-const actionGestures: unknown[] = []; // 动作（非 isActionable 检查）的 callFunctionOn 的 userGesture
-const queryGestures: unknown[] = []; // 只读检查（isActionable、读 checked 状态）的 userGesture
-const evaluateGestures: unknown[] = []; // Runtime.evaluate 的 userGesture
+const gestures: unknown[] = []; // 所有 evaluate、callFunctionOn 的 userGesture：一个都不能是 true（页面自发弹窗要被浏览器拦住）
 const listeners = new Map<string, (value: unknown) => void>();
 // 假页面：CSS 选择器 "#missing" 找不到，其它都找得到；无障碍树里 button "保存" 唯一，"重复" 有两个，"隐藏" 不存在。
 // visibleAfter 控制元素要过几次检查才可见，用来测自动等待。
@@ -22,7 +20,7 @@ const page = { cdp: {
   async send(method: string, params?: any) {
     calls.push(method);
     if (method === "Runtime.evaluate") {
-      evaluateGestures.push(params?.userGesture);
+      gestures.push(params?.userGesture);
       const expression = String(params?.expression ?? "");
       if (expression.startsWith("document.querySelector(")) {
         const selector = JSON.parse(expression.match(/querySelector\((.*)\)/)![1]!);
@@ -33,11 +31,11 @@ const page = { cdp: {
     if (method === "Runtime.callFunctionOn") {
       const fn = String(params?.functionDeclaration ?? "");
       if (fn.includes("getBoundingClientRect")) {
-        queryGestures.push(params?.userGesture);
+        gestures.push(params?.userGesture);
         checks++;
         return { result: { value: checks > visibleAfter } };
       }
-      (fn.includes("checked") || fn.includes("fnSource") ? queryGestures : actionGestures).push(params?.userGesture);
+      gestures.push(params?.userGesture);
       expressions.push(`${params.objectId} ${fn}`);
       if (fn.includes("setter.call")) return { result: { value: params.arguments[0].value } };
       if (fn.includes("checked")) return { result: { value: false } };
@@ -66,15 +64,12 @@ const page = { cdp: {
 } } as unknown as PageHandle;
 
 assert.equal(await evaluate(page, "21 * 2"), 42);
-assert.equal(evaluateGestures.at(-1), true, "task 里的 evaluate 可能含操作，带 userGesture");
 await goto(page, "https://example.com");
 assert.deepEqual(calls, ["Runtime.evaluate", "Page.enable", "Page.navigate"], "evaluate 不需要 Runtime.enable");
 assert.equal(listeners.size, 0);
 
 
 await click(page, "#go");
-assert.ok(actionGestures.length > 0 && actionGestures.every((value) => value === true), "元素动作要带 userGesture:true，否则 target=_blank 会被弹窗拦截");
-assert.ok(queryGestures.length > 0 && queryGestures.every((value) => value !== true), "定位时的可操作性检查是只读查询，不带 userGesture");
 await fill(page, "#q", "hello");
 await press(page, "#q", "Enter");
 await scroll(page, undefined, { deltaY: 120 });
@@ -120,10 +115,9 @@ assert.equal(await toggle(page, { role: "button", name: "保存" }, { target: tr
 
 // waitForSelector 在 Node 侧轮询：每次只做一次快速 evaluate，出现后立即返回
 let polls = 0;
-const waitingGestures: unknown[] = [];
 const waiting = { cdp: {
   async send(method: string, params?: any) {
-    if (method === "Runtime.evaluate") { polls++; waitingGestures.push(params?.userGesture); return { result: { value: polls >= 3 } }; }
+    if (method === "Runtime.evaluate") { polls++; gestures.push(params?.userGesture); return { result: { value: polls >= 3 } }; }
     return {};
   },
   on() { return () => {}; },
@@ -131,7 +125,6 @@ const waiting = { cdp: {
 } } as unknown as PageHandle;
 await waitForSelector(waiting, "#late");
 assert.equal(polls, 3, "前两次没找到，第三次出现");
-assert.ok(waitingGestures.length === 3 && waitingGestures.every((value) => value !== true), "waitForSelector 的轮询不带 userGesture");
 
 // goto 等什么：只认本次导航提交之后的事件；until 控制等到哪一步；同文档跳转等 navigatedWithinDocument
 {
@@ -202,6 +195,74 @@ assert.ok(waitingGestures.length === 3 && waitingGestures.every((value) => value
     const { fake } = make();
     await assert.rejects(goto(fake, "https://a.test/", { timeout: 40 }), /goto timeout after 40ms/);
   }
+}
+
+
+// userGesture：evaluate、元素动作、轮询都不带（无人值守，页面自发弹窗被浏览器拦住，不会开新标签抢前台）
+assert.ok(gestures.length > 10 && gestures.every((value) => value !== true), "所有 evaluate / callFunctionOn 都不能带 userGesture:true");
+
+// expectPopup：action 期间接管页面的新窗口，由 yodo 另开页面导航过去，返回新页面句柄；超时、非 http 地址都报错，钩子总会摘掉
+{
+  type Handler = (value: unknown) => void;
+  const makePopupPage = (navigated: string[]) => {
+    const handlers = new Map<string, Handler>();
+    const fire = (event: string, value: unknown = {}) => handlers.get(event)?.(value);
+    return { cdp: {
+      async send(method: string, params?: { url?: string }) {
+        if (method === "Page.navigate") { navigated.push(params!.url!); setTimeout(() => { fire("Page.frameNavigated", { frame: { id: "main" } }); fire("Page.domContentEventFired"); }, 5); }
+        return {};
+      },
+      on(event: string, handler: Handler) { handlers.set(event, handler); return () => { handlers.delete(event); }; },
+      async once() { return {}; },
+    }, async newPage() { throw new Error("不应再开页面"); } } as unknown as PageHandle;
+  };
+  const makeOpener = (urlAfterPolls: string | null) => {
+    const seen: string[] = [];
+    const navigated: string[] = [];
+    let polls = 0;
+    const popup = makePopupPage(navigated);
+    const opener = { cdp: {
+      async send(method: string, params?: { expression?: string }) {
+        if (method !== "Runtime.evaluate") return {};
+        const expression = String(params?.expression ?? "");
+        if (expression.includes("addEventListener")) { seen.push("install"); return { result: { value: undefined } }; }
+        if (expression.includes("originalOpen")) { seen.push("remove"); return { result: { value: undefined } }; }
+        seen.push("take");
+        polls++;
+        return { result: { value: urlAfterPolls !== null && polls >= 3 ? urlAfterPolls : null } };
+      },
+      on() { return () => {}; },
+      async once() { return {}; },
+    }, async newPage() { seen.push("newPage"); return popup; } } as unknown as PageHandle;
+    return { opener, popup, seen, navigated };
+  };
+
+  const ok = makeOpener("https://a.test/detail");
+  let clicked = 0;
+  const got = await expectPopup(ok.opener, async () => { clicked++; });
+  assert.equal(clicked, 1);
+  assert.equal(got, ok.popup, "返回新页面的句柄");
+  assert.deepEqual(ok.navigated, ["https://a.test/detail"], "新页面导航到页面想打开的地址");
+  assert.equal(ok.seen[0], "install");
+  assert.ok(ok.seen.includes("remove"), "钩子要摘掉");
+  assert.ok(ok.seen.indexOf("remove") < ok.seen.indexOf("newPage"), "先摘钩子再开新页面");
+
+  const none = makeOpener(null);
+  await assert.rejects(expectPopup(none.opener, async () => {}, { timeout: 250 }), /没有要打开的新窗口/);
+  assert.ok(none.seen.includes("remove"), "超时报错时钩子也要摘掉");
+  assert.ok(!none.seen.includes("newPage"));
+
+  const blank = makeOpener("about:blank");
+  await assert.rejects(expectPopup(blank.opener, async () => {}), /不是 http/);
+  assert.ok(blank.seen.includes("remove"));
+
+  const failing = makeOpener("https://a.test/");
+  await assert.rejects(expectPopup(failing.opener, async () => { throw new Error("点击失败"); }), /点击失败/);
+  assert.ok(failing.seen.includes("remove"), "action 抛错时钩子也要摘掉");
+
+  const direct = makeOpener(null);
+  assert.equal(await openPage(direct.opener, "https://b.test/"), direct.popup);
+  assert.deepEqual(direct.navigated, ["https://b.test/"]);
 }
 
 console.log("task lib selfcheck ok");

@@ -132,6 +132,22 @@ function fakeRaw(ops: TabOps, sent: Sent[], tabs?: Map<number, { title: string }
   assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 2);
 }
 
+// 2b. run 期间另开的页面（openRunPage）：开在 run 窗口里，和本次 run 的 tab 一起在 run 结束时关闭，锚点保留
+{
+  const { ops, tabs, calls } = fakeTabs();
+  const sent: Sent[] = [];
+  const { raw } = fakeRaw(ops, sent);
+  const ctx = new CdpContext(raw);
+  const main = await ctx.newPage();
+  const extra = await ctx.openRunPage();
+  assert.notEqual(extra.targetId, main.targetId);
+  assert.equal(calls.filter((c) => c.startsWith("openWindow")).length, 1, "额外页面开在同一个 run 窗里");
+  assert.equal(tabs.size, 3, "锚点 + 本次 run 的 tab + 额外页面");
+  await ctx.endRunTab();
+  assert.equal(tabs.size, 1, "run 结束后只剩锚点");
+  assert.ok(calls.includes(`closeTab:${extra.targetId}`), "额外页面也被关掉");
+}
+
 // 3. 录制窗：focused=false（不抢用户焦点），窗口 id 直接来自 openWindow
 {
   const { ops, calls } = fakeTabs();

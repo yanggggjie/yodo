@@ -311,6 +311,13 @@ export class CdpContext {
     return await this.attachTarget(String(tabId), true);
   }
 
+  /** run 期间 task 另开的页面（popup 转成的新页面等）：开在 run 窗口里并激活，不抢焦点；run 结束时随其它非锚点 tab 一起关闭。 */
+  async openRunPage(): Promise<CdpPage> {
+    const windowId = await this.ensureRunWindow();
+    const { tabId } = await this.raw.ops.openTab({ windowId, url: "about:blank", active: true });
+    return await this.attachTarget(String(tabId), true);
+  }
+
   /** run 结束：关闭本次 run 的 tab，以及 run 期间新开的 tab（点 target=_blank 链接等，扩展按 opener 纳入）；锚点保留。 */
   async endRunTab(): Promise<void> {
     const id = this.runTabId;
