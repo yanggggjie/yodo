@@ -23,7 +23,7 @@ yodo 用用户已登录的 Chrome 完成网站任务。每个可复用的流程�
 |---|---|
 | `yodo run` | 列出 task 摘要（名称、`@status`、`@summary`、参数） |
 | `yodo run <task> [--参数名 值 ...]` | 运行 task，stdout 输出 JSON。参数一律具名：`--名字 值` 或 `--名字=值`，值里有空格要加引号；缺必填参数、传了没声明的参数、写成位置参数都会直接报错 |
-| `yodo eval '<代码>'` | 顺序组合多个 task，stdout 输出 JSON（见第 5.1 节） |
+| `yodo eval '<代码>'` | 顺序组合多个 task，stdout 输出 JSON（见第 5.2 节） |
 | `yodo record start [name]` | 开始录制，在后台打开标题为 `yodo record` 的窗口 |
 | `yodo record stop` | 结束录制，输出 `recordDir` 与 `timeline` |
 | `yodo record abort` | 放弃录制 |
@@ -96,7 +96,8 @@ task 里写进去的每个选择器、地址、字段、id，都要在录制材�
 - 一个 task 是一次 run：处理一个页面，输出一个结果，不依赖上一个 task 留下的浏览器状态。每次 run 都是新标签，结束就关闭。
 - 一个 task 里可以有多个请求。
 - 需要状态时只能靠参数传：前一个 task 返回 id 或 URL，`yodo eval` 把它们串起来，后一个 task 用 `--id`、`--url` 接收。
-- 流程涉及第二个页面时拆成两个 task，不要在一个 task 里开第二个页面。task 里页面自己想打开的新窗口（点 `target=_blank` 的链接、`window.open`）会被浏览器拦住，不会开新标签：读出链接地址作为这个 task 的输出，由下一个 task 用 `goto` 打开。
+- 一个 task 里只能 `goto` 一次。流程要打开第二个页面（另一个标签页，或再导航到另一个地址）时，拆成两个 task。
+- task 里页面自己想打开的新窗口（点 `target=_blank` 的链接、`window.open`）会被浏览器拦住，不会开新标签：读出链接地址作为这个 task 的输出，由下一个 task 用 `goto` 打开。
 - 只读取的 task 不产生副作用；有副作用的 task 先读状态，已满足就不再操作（返回 `already`）。
 
 **请求和 DOM 操作的粒度：以「请求」为验证单位**
