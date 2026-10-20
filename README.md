@@ -94,17 +94,17 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 - 完全以源码分发，遇到问题可让 agent 读源码修复，见「2.2 遇到问题」。
 - 从 v1 升级时给出完整的扩展加载步骤，并检查旧 task。
 - 登录失效时提醒你重新登录。
-- 运行时不再弹到前台：页面自己想打开的新窗口会被拦住。
+- 超时放宽：单个步骤 60 秒，整个 task 115 秒。
 
 #### v2.0.0
 
-- 改用 Chrome 扩展连接，不再需要 remote debugging 和 Allow 弹窗；首次使用要加载一次扩展，点工具栏图标可立即重连。
-- 录制更完整：点击、输入、勾选、滚动、页面跳转（含单页应用、新标签页、iframe），学习更准确；录制和运行窗口在后台打开。
-- 命令统一为 `yodo`（`run`、`eval`、`record`、`daemon`、`doctor`），task 参数改为具名：`yodo run <task> --参数 值`。
-- 运行更稳定：超时、并发等待、统一的失败信息与退出码，保存运行历史；`yodo eval` 可组合多个 task。
+- 改用 Chrome 扩展连接，不再需要 remote debugging 和 Allow 弹窗，首次使用加载一次扩展。
+- 录制更完整，覆盖点击、输入、勾选、滚动和页面跳转（含单页应用、新标签页、iframe）。
+- 命令统一为 `yodo`，task 参数改为具名：`yodo run <task> --参数 值`；`yodo eval` 可组合多个 task。
+- 运行更稳定：超时、并发等待和失败信息统一，保存运行历史。
 - 升级自动换新版本；任务或录制进行中时，结束后运行 `yodo daemon restart`。
 - macOS 已验证，Windows、Linux 尚未充分测试。
-- **不兼容**：v1 带参数的 task 需改成具名参数（`@param 名字`、`yodo.params.名字`）；`~/.yodo/temp` 和 `@executor` 取消。
+- **不兼容**：v1 带参数的 task 需改成具名参数；`~/.yodo/temp` 和 `@executor` 取消。
 
 #### v1.2.0
 
