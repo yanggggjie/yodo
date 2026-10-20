@@ -22,6 +22,7 @@ yodo 运行时架构。仓库边界、开发验证、分发发布见同目录的
 - task 参数一律具名：`yodo run <task> --名字 值`（也接受 `--名字=值`），不接受位置参数。`yodo run` 按文件头 `@param 名字 说明`（名字后带 `?` 为可选）校验：缺必填、传了没声明的、重复的、位置参数，都在启动子进程之前报错，不写运行历史。校验通过后，参数以 JSON 放进子进程的环境变量 `YODO_PARAMS`，task 里用 `yodo.params.名字` 读取（值都是字符串；`src/sdk.ts` 的 `readParams`）。`yodo eval` 里 `task(name, { 名字: 值 })` 走同一套校验，值先转成字符串。运行历史记录 `{ params, output }`。
 - task 文件头只认文件开头第一个块注释里的 `@标签`；读不了的文件在 `yodo run` 列表里标为 `status: "invalid"`，不影响其它 task。
 - 超时只有两层：单步骤 `STEP_TIMEOUT_MS`（30 秒，`src/templates/task-lib/page.js`，用于 `evaluate`、`goto`、`waitForSelector`、`expectRequest`；单条 CDP 命令的 `CDP_COMMAND_TIMEOUT_MS` 同为 30 秒）；整个 task 子进程 `TASK_TIMEOUT_MS`（90 秒），task 头部可用 `@timeout <秒>` 覆盖。超时被 SIGKILL 终止并按失败返回，`eval` 对每个内层 task 单独计时。
+- 页面脚本（`Runtime.evaluate`、`Runtime.callFunctionOn`）的 CDP 命令超时后，命令被放弃，但脚本还在页面里跑，死循环会让标签页一直卡着。`browser/extension.ts` 在这种超时时补发一次 `Runtime.terminateExecution`（失败忽略，原超时错误照常抛出）；页面空闲时发送也安全。不给 `evaluate` 加 `timeout` 参数：它只管同步执行，管不了等待中的 Promise。
 - `goto` 默认等 DOMContentLoaded，且只认本次导航提交（主框架 `frameNavigated`）之后的事件，上一个页面还没发完的加载事件不算数；`until: "commit" | "load"` 可选；不换文档的跳转（hash、pushState）等 `navigatedWithinDocument`，提交之后出现的不算。`evaluate` 不发 `Runtime.enable`（`Runtime.evaluate` 不需要它，每次 enable 会让 Chrome 重发全部执行上下文事件）。`cdp.once` 不指定 `timeout` 时用单条命令的上限，不会一直挂着。
 - 连接的读写按 UTF-8 解码（`socket.setEncoding("utf8")`，两端都是）：一个汉字的三个字节可能被拆在两个数据块里，按块 `toString()` 拼接会把它变成替换字符。
 - `RpcPeer.failure`：连接意外断开、或监听函数抛错时 reject；`yodo.run` 把它和 task 函数赛跑，task 不会因此一直挂着，监听函数里的错误成为这次 run 的失败，而不是进程的未捕获异常。daemon 写队列超限（单条 16 MB、排队 64 MB）时，先写一行没有 id 的错误说明原因再断开连接，client 把它作为失败原因。
