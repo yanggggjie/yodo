@@ -12,9 +12,13 @@
 
 yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 同类。它使用你本机已登录的 Google Chrome：新任务只需演示一次，学会后直接运行脚本，**更快、token 更省**。
 
+**yodo 宣传视频**
+
 <a href="https://youtu.be/ktO6uuVL0Yo">
   <img src="https://img.youtube.com/vi/ktO6uuVL0Yo/maxresdefault.jpg" alt="yodo 宣传视频" width="640">
 </a>
+
+点击图片，在 YouTube 播放。
 
 测试任务：读取 X Following 最近 3 条，生成中文摘要，再分别发布到知乎和即刻。
 
@@ -25,9 +29,7 @@ yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-
 | `browser-use` | 是 | 9 分 45 秒 | $0.93 |
 | `yodo (learn)` | 是 | 6 分 46 秒 | $0.83 |
 
-![耗时](bench/time.svg)
-
-![花费](bench/cost.svg)
+<img src="bench/time.svg" alt="耗时" width="410"> <img src="bench/cost.svg" alt="花费" width="410">
 
 `yodo (run)` 是运行已学会的脚本，`yodo (learn)` 是演示后学习并完成任务；学习只需一次。数据在 v1.2.0 上测得，v2 未重测，每种方式只测一次。分析与复现方法见 [bench/README.md](bench/README.md)。
 
