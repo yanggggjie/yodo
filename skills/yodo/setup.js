@@ -57,7 +57,7 @@ console.log(`yodo 版本 → ${version.build}`);
 
 installNativeHost(process.execPath);
 console.log(`native messaging host 已注册 → ${manifestPath()}`);
-console.log(`请在 chrome://extensions 开启开发者模式，点「加载已解压的扩展程序」，选择：${EXTENSION_DIR}`);
+console.log(`扩展目录 → ${EXTENSION_DIR}`);
 
 ensureHomeLayout();
 writeShim(process.execPath);
