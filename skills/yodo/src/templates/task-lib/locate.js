@@ -17,6 +17,8 @@ export async function callOn(page, objectId, fn, ...args) {
     arguments: args.map((value) => ({ value })),
     returnByValue: true,
     awaitPromise: true,
+    // 和 evaluate 一致：算作用户操作，否则 click 打不开 target=_blank 新标签（弹窗拦截）
+    userGesture: true,
   });
   if (response.exceptionDetails) {
     throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "DOM 操作失败");

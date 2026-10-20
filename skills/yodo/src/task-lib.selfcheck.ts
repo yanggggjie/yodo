@@ -5,6 +5,7 @@ import type { PageHandle } from "./sdk.ts";
 
 const calls: string[] = [];
 const expressions: string[] = [];
+const gestures: unknown[] = []; // 每次 callFunctionOn 的 userGesture
 const listeners = new Map<string, (value: unknown) => void>();
 // 假页面：CSS 选择器 "#missing" 找不到，其它都找得到；无障碍树里 button "保存" 唯一，"重复" 有两个，"隐藏" 不存在。
 // visibleAfter 控制元素要过几次检查才可见，用来测自动等待。
@@ -27,6 +28,7 @@ const page = { cdp: {
       return { result: { value: 42 } }; // evaluate 的普通调用，比如 scroll
     }
     if (method === "Runtime.callFunctionOn") {
+      gestures.push(params?.userGesture);
       const fn = String(params?.functionDeclaration ?? "");
       if (fn.includes("getBoundingClientRect")) {
         checks++;
@@ -66,6 +68,7 @@ assert.equal(listeners.size, 0);
 
 
 await click(page, "#go");
+assert.ok(gestures.length > 0 && gestures.every((value) => value === true), "元素动作要带 userGesture:true，否则 target=_blank 会被弹窗拦截");
 await fill(page, "#q", "hello");
 await press(page, "#q", "Enter");
 await scroll(page, undefined, { deltaY: 120 });
