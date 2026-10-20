@@ -1,5 +1,4 @@
 // 用法：node <skill 目录>/scripts/dev/record.mjs（本机是 ~/.yodo/scripts/dev/record.mjs） [场景.mjs]
-// 加 --popups 时场景才会开新标签（widgets 用）。
 // 起夹具 → record.start → 场景里用 Driver 模拟用户操作 → record.stop → 打印汇总，并与上一次比较。需要 dev 已开启。
 import * as fs from "node:fs";
 import * as os from "node:os";

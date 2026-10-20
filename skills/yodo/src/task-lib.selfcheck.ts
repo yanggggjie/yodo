@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { check, click, fill, press, scroll, select, toggle, waitForSelector } from "./templates/task-lib/dom.js";
-import { evaluate, expectPopup, goto, openPage } from "./templates/task-lib/page.js";
+import { evaluate, goto } from "./templates/task-lib/page.js";
 import type { PageHandle } from "./sdk.ts";
 
 const calls: string[] = [];
@@ -200,69 +200,4 @@ assert.equal(polls, 3, "前两次没找到，第三次出现");
 
 // userGesture：evaluate、元素动作、轮询都不带（无人值守，页面自发弹窗被浏览器拦住，不会开新标签抢前台）
 assert.ok(gestures.length > 10 && gestures.every((value) => value !== true), "所有 evaluate / callFunctionOn 都不能带 userGesture:true");
-
-// expectPopup：action 期间接管页面的新窗口，由 yodo 另开页面导航过去，返回新页面句柄；超时、非 http 地址都报错，钩子总会摘掉
-{
-  type Handler = (value: unknown) => void;
-  const makePopupPage = (navigated: string[]) => {
-    const handlers = new Map<string, Handler>();
-    const fire = (event: string, value: unknown = {}) => handlers.get(event)?.(value);
-    return { cdp: {
-      async send(method: string, params?: { url?: string }) {
-        if (method === "Page.navigate") { navigated.push(params!.url!); setTimeout(() => { fire("Page.frameNavigated", { frame: { id: "main" } }); fire("Page.domContentEventFired"); }, 5); }
-        return {};
-      },
-      on(event: string, handler: Handler) { handlers.set(event, handler); return () => { handlers.delete(event); }; },
-      async once() { return {}; },
-    }, async newPage() { throw new Error("不应再开页面"); } } as unknown as PageHandle;
-  };
-  const makeOpener = (urlAfterPolls: string | null) => {
-    const seen: string[] = [];
-    const navigated: string[] = [];
-    let polls = 0;
-    const popup = makePopupPage(navigated);
-    const opener = { cdp: {
-      async send(method: string, params?: { expression?: string }) {
-        if (method !== "Runtime.evaluate") return {};
-        const expression = String(params?.expression ?? "");
-        if (expression.includes("addEventListener")) { seen.push("install"); return { result: { value: undefined } }; }
-        if (expression.includes("originalOpen")) { seen.push("remove"); return { result: { value: undefined } }; }
-        seen.push("take");
-        polls++;
-        return { result: { value: urlAfterPolls !== null && polls >= 3 ? urlAfterPolls : null } };
-      },
-      on() { return () => {}; },
-      async once() { return {}; },
-    }, async newPage() { seen.push("newPage"); return popup; } } as unknown as PageHandle;
-    return { opener, popup, seen, navigated };
-  };
-
-  const ok = makeOpener("https://a.test/detail");
-  let clicked = 0;
-  const got = await expectPopup(ok.opener, async () => { clicked++; });
-  assert.equal(clicked, 1);
-  assert.equal(got, ok.popup, "返回新页面的句柄");
-  assert.deepEqual(ok.navigated, ["https://a.test/detail"], "新页面导航到页面想打开的地址");
-  assert.equal(ok.seen[0], "install");
-  assert.ok(ok.seen.includes("remove"), "钩子要摘掉");
-  assert.ok(ok.seen.indexOf("remove") < ok.seen.indexOf("newPage"), "先摘钩子再开新页面");
-
-  const none = makeOpener(null);
-  await assert.rejects(expectPopup(none.opener, async () => {}, { timeout: 250 }), /没有要打开的新窗口/);
-  assert.ok(none.seen.includes("remove"), "超时报错时钩子也要摘掉");
-  assert.ok(!none.seen.includes("newPage"));
-
-  const blank = makeOpener("about:blank");
-  await assert.rejects(expectPopup(blank.opener, async () => {}), /不是 http/);
-  assert.ok(blank.seen.includes("remove"));
-
-  const failing = makeOpener("https://a.test/");
-  await assert.rejects(expectPopup(failing.opener, async () => { throw new Error("点击失败"); }), /点击失败/);
-  assert.ok(failing.seen.includes("remove"), "action 抛错时钩子也要摘掉");
-
-  const direct = makeOpener(null);
-  assert.equal(await openPage(direct.opener, "https://b.test/"), direct.popup);
-  assert.deepEqual(direct.navigated, ["https://b.test/"]);
-}
-
 console.log("task lib selfcheck ok");

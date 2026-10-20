@@ -28,8 +28,7 @@ yodo 运行时架构。仓库边界、开发验证、分发发布见同目录的
 - `RpcPeer.failure`：连接意外断开、或监听函数抛错时 reject；`yodo.run` 把它和 task 函数赛跑，task 不会因此一直挂着，监听函数里的错误成为这次 run 的失败，而不是进程的未捕获异常。daemon 写队列超限（单条 16 MB、排队 64 MB）时，先写一行没有 id 的错误说明原因再断开连接，client 把它作为失败原因。
 - run 结束（`runEnd`）：关掉本次 run 的 tab，以及 run 期间在 run 窗口里新开的 tab（点 `target=_blank` 链接等，扩展按 opener 纳入），锚点保留。清理做完才释放模式，下一个 `run.begin` 不会和清理同时操作 run 窗口。`window.open` 带窗口特征弹出的独立窗口不在这里处理。
 - 定位（`templates/task-lib/locate.js`）：目标是 CSS 字符串或 `{ role, name }`。role/name 用 `Accessibility.queryAXTree`（根是 `document` 对象）查找，`DOM.resolveNode` 转成元素，必须唯一；CSS 保持取第一个匹配的旧行为。动作（click、fill、press、check、select、toggle）先等元素存在、可见且未禁用，默认 `ACTION_TIMEOUT_MS`（10 秒），超时报出在等什么。
-- 不抢前台：task-lib 的 `evaluate`、元素动作、轮询都不带 `userGesture`，页面自己（或脚本）调用 `window.open`、点 `target=_blank` 会被浏览器的弹窗拦截拦住。原因：页面自己开的新标签会让 Chrome 激活窗口和应用（实测会抢前台），`focused: false` 管不住这一条；而带了 `userGesture` 之后，连轮询都会让页面一直处于被用户激活的状态，页面自发的弹窗也被放行。
-- 新页面：`PageHandle.newPage()`（RPC `run.openPage`）在 run 窗口里另开空白页面并激活（扩展自己创建标签不会抢前台），返回新页面的句柄；run 结束时随其它非锚点 tab 一起关闭。task-lib 的 `openPage(page, url)` 是 `newPage` + `goto`；`expectPopup(page, action)` 在 action 期间临时接管页面的 `window.open` 和 `<a target=_blank>`（不真正打开），拿到目标网址后用 `openPage` 开页面。异步触发（action 结束、`timeout` 之后）的拿不到，只支持 http(s)。
+- 不抢前台：task-lib 的 `evaluate`、元素动作、轮询都不带 `userGesture`，页面自己（或脚本）调用 `window.open`、点 `target=_blank` 会被浏览器的弹窗拦截拦住。原因：页面自己开的新标签会让 Chrome 激活窗口和应用（实测会抢前台），`focused: false` 管不住这一条；而带了 `userGesture` 之后，连轮询都会让页面一直处于被用户激活的状态，页面自发的弹窗也被放行。 dev 驱动是例外：它模拟用户演示，操作脚本带 `userGesture: true`，演示时点 `target=_blank` 能像真人一样开新标签，录制器会记下这个新标签。task 不需要第二个页面（见 SKILL.md 的 task 粒度），所以 task-lib 不提供开新页面的接口。
 - `waitForSelector` 在 Node 侧轮询，不在页面里跑长循环；它没有 `timeout` 参数，固定使用单步骤上限。
 - `RpcPeer`（`src/cli/rpc.ts`）是唯一的 socket 客户端：`sessionRpc` 是一次一连接的用法，SDK 用它保持长连接并接收页面事件。
 
@@ -48,7 +47,7 @@ relay 断开（刷新扩展、service worker 重启、Chrome 重启）是日常�
 holder 通过 socket 提供：
 
 ```text
-run.begin / run.openPage / run.end
+run.begin / run.end
 cdp.send        { pageId, method, params, timeoutMs? }
 cdp.event       （推送）{ sessionId, method, params }
 record.start / record.stop / record.abort

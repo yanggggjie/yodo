@@ -1,5 +1,5 @@
 export type HandshakeStatus = "need-install" | "need-chrome" | "need-extension";
-export type RpcMethod = "ping" | "run.begin" | "run.openPage" | "run.end" | "cdp.send" | "record.start" | "record.stop" | "record.abort" | "dev.pages" | "dev.cdp";
+export type RpcMethod = "ping" | "run.begin" | "run.end" | "cdp.send" | "record.start" | "record.stop" | "record.abort" | "dev.pages" | "dev.cdp";
 export type JsonRpcRequest = { jsonrpc: "2.0"; id: string; method: RpcMethod; params?: Record<string, unknown> };
 /** 页面事件推送：sessionId 即 pageId（tab 的字符串形式）。 */
 export type JsonRpcNotification = { jsonrpc: "2.0"; method: "cdp.event"; params: { sessionId: string; method: string; params: unknown } };

@@ -10,7 +10,6 @@ const { SESSION_DIR, SESSION_SOCK } = await import("./utils/constants.ts");
 fs.mkdirSync(SESSION_DIR, { recursive: true });
 
 const seen: string[] = [];
-const sentTo: string[] = []; // 每条 cdp.send 发往的 pageId
 const server = net.createServer((socket) => {
   let buffer = "";
   socket.on("data", (chunk) => {
@@ -21,9 +20,7 @@ const server = net.createServer((socket) => {
       let result: unknown = {};
       if (request.method === "ping") result = { pid: process.pid, chrome: "mock", extension: true, pages: 1, record: null };
       if (request.method === "run.begin") result = { pageId: "P1" };
-      if (request.method === "run.openPage") result = { pageId: "P2" };
       if (request.method === "cdp.send") {
-        sentTo.push(request.params.pageId);
         socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { result: { value: "ok" } } })}\n`);
         // 页面事件由 holder 推送，按 pageId 与 method 分发
         socket.write(`${JSON.stringify({ jsonrpc: "2.0", method: "cdp.event", params: { sessionId: "P1", method: "Page.loadEventFired", params: {} } })}\n`);
@@ -39,7 +36,6 @@ const { yodo } = await import("./sdk.ts");
 const output: string[] = []; const original = console.log; console.log = (...args) => output.push(args.map(String).join(" "));
 process.argv[1] = path.join(TEST_HOME, "faketask.js");
 let firstRunLines = 0;
-let thirdStart = 0;
 const stderrChunks: string[] = []; const originalStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = ((chunk: unknown) => { stderrChunks.push(String(chunk)); return true; }) as typeof process.stderr.write;
 try {
@@ -62,24 +58,13 @@ try {
   });
   assert.equal(reachedEnd, false, "监听函数失败后 run 不再等 task 函数");
   process.exitCode = 0; // 上面那次失败设置了退出码，这里复位，免得自检进程本身报失败
-  // page.newPage()：向 holder 要一个新页面，返回的句柄把命令发往新页面的 pageId
-  thirdStart = output.length;
-  await yodo.run(async ({ page }) => {
-    const other = await page.newPage();
-    await other.cdp.send("Runtime.evaluate", { expression: "1" });
-    return "opened";
-  });
 } finally { console.log = original; process.stderr.write = originalStderrWrite; server.close(); fs.rmSync(TEST_HOME, { recursive: true, force: true }); }
 
 assert.equal(JSON.parse(output.slice(0, firstRunLines).join("\n")).status, "success");
 assert.ok(!output.join("\n").includes("debug-line"), "task 的 console 输出不能进 stdout");
-const second = JSON.parse(output.slice(firstRunLines, thirdStart).join("\n"));
+const second = JSON.parse(output.slice(firstRunLines).join("\n"));
 assert.equal(second.status, "failure");
 assert.match(second.error, /listener boom/);
 assert.ok(stderrChunks.join("").includes("debug-line"), "task 的 console 输出应走 stderr");
-const third = JSON.parse(output.slice(thirdStart).join("\n"));
-assert.equal(third.status, "success");
-assert.equal(third.result, "opened");
-assert.deepEqual(sentTo, ["P1", "P1", "P2"], "newPage 返回的句柄发往新页面");
-assert.deepEqual(seen, ["ping", "run.begin", "cdp.send", "run.end", "ping", "run.begin", "cdp.send", "run.end", "ping", "run.begin", "run.openPage", "cdp.send", "run.end"]);
+assert.deepEqual(seen, ["ping", "run.begin", "cdp.send", "run.end", "ping", "run.begin", "cdp.send", "run.end"]);
 console.log("sdk selfcheck ok");
