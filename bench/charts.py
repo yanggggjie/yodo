@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
-"""Generate time.svg and cost.svg next to this file."""
+"""
+生成 bench/time.svg 和 bench/cost.svg：python3 bench/charts.py
 
-from pathlib import Path
+样式取自 brand/README.md：墨黑背景；只有 yodo (run) 用暮色橙红强调，
+yodo (learn) 用灰色虚线框（一次性的学习，不强调），对照的其它工具用对照灰实心柱；数字先说，原理后说。颜色、字体、图标直接取 brand/wordmark.py，
+品牌改了这里跟着变。需要 PNG 时：rsvg-convert -w 1760 bench/time.svg -o bench/time.png
+"""
+import os
+import sys
 
+sys.dont_write_bytecode = True  # 导入 brand/ 里的模块时不留 __pycache__
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "brand"))
+from wordmark import ACCENT, CJK, INK, LATIN, MUTED, PAPER, icon_at  # noqa: E402
+
+GRAY = "#6B6B76"   # 对照灰：和其它工具对比时，对方一律用它
+
+# (名称, 耗时秒, 花费美元, 类型)
 ROWS = [
     ("yodo (run)", 56, 0.24, "run"),
     ("agent-browser", 6 * 60 + 25, 0.83, "other"),
@@ -10,84 +24,86 @@ ROWS = [
     ("yodo (learn)", 6 * 60 + 46, 0.83, "learn"),
 ]
 
-FILL = {
-    "run": "#1f6b4a",
-    "other": "#8b9099",
-    "learn": "url(#learn)",
-}
-
-TIME_LABEL = {
-    56: "56 秒",
-    385: "6 分 25 秒",
-    585: "9 分 45 秒",
-    406: "6 分 46 秒",
-}
+W, PAD = 880, 40
+LABEL_W, BAR_X = 190, 40 + 190   # 左侧名称列、柱子起点
+PLOT_W = 460                     # 最长的柱子宽度；右侧留给数值
+ROW_H, ROW_GAP = 40, 22
+TOP = 132                        # 第一行柱子的顶部
+FOOT = 36
 
 
-def bar_chart(path: Path, title: str, values: list[float], labels: list[str], kinds: list[str]) -> None:
-    width, height = 720, 268
-    left, right, top = 168, 28, 52
-    row_h, gap = 40, 14
-    plot_w = width - left - right
-    max_v = max(values)
-    names = [row[0] for row in ROWS]
+def duration(seconds):
+    m, s = divmod(seconds, 60)
+    return f"{s} 秒" if m == 0 else f"{m} 分 {s} 秒"
 
-    bars = []
+
+def chart(title, hint, values, labels, factor, factor_caption, note):
+    height = TOP + len(ROWS) * ROW_H + (len(ROWS) - 1) * ROW_GAP + FOOT + 44
+    names = [r[0] for r in ROWS]
+    kinds = [r[3] for r in ROWS]
+    top_value = max(values)
+    name_fill = {"run": PAPER, "learn": MUTED, "other": MUTED}
+
+    rows = []
     for i, (name, value, label, kind) in enumerate(zip(names, values, labels, kinds)):
-        y = top + i * (row_h + gap)
-        w = max(6, plot_w * (value / max_v))
-        fill = FILL[kind]
-        text_x = left + w + 10
-        anchor = "start"
-        color = "#222"
-        if w > 220:
-            text_x = left + w - 12
-            anchor = "end"
-            color = "#fff" if kind == "run" else "#222"
-        bars.append(
-            f'<rect x="{left}" y="{y}" width="{w:.1f}" height="{row_h}" rx="6" fill="{fill}"/>'
-            f'<text x="20" y="{y + 26}" font-size="15" fill="#222">{name}</text>'
-            f'<text x="{text_x:.1f}" y="{y + 26}" text-anchor="{anchor}" font-size="15" fill="{color}">{label}</text>'
+        y = TOP + i * (ROW_H + ROW_GAP)
+        w = max(8, PLOT_W * value / top_value)
+        value_fill = "url(#accent)" if kind == "run" else PAPER
+        if kind == "run":
+            bar = f'<rect x="{BAR_X}" y="{y}" width="{w:.1f}" height="{ROW_H}" rx="10" fill="url(#accent)"/>'
+        elif kind == "learn":  # 灰色虚线框：一次性的学习，不强调
+            bar = (f'<rect x="{BAR_X + 1}" y="{y + 1}" width="{w - 2:.1f}" height="{ROW_H - 2}" rx="9" fill="{GRAY}" '
+                   f'fill-opacity="0.18" stroke="{GRAY}" stroke-width="2" stroke-dasharray="7 6"/>')
+        else:
+            bar = f'<rect x="{BAR_X}" y="{y}" width="{w:.1f}" height="{ROW_H}" rx="10" fill="{GRAY}"/>'
+        rows.append(
+            f'<text x="{PAD}" y="{y + 26}" fill="{name_fill[kind]}" font-family="{LATIN}" font-size="18" '
+            f'font-weight="{600 if kind == "run" else 500}">{name}</text>'
+            f'<rect x="{BAR_X}" y="{y}" width="{PLOT_W}" height="{ROW_H}" rx="10" fill="{PAPER}" opacity="0.06"/>'
+            f'{bar}'
+            f'<text x="{BAR_X + w + 14:.1f}" y="{y + 27}" fill="{value_fill}" font-family="{LATIN}" font-size="22" '
+            f'font-weight="700">{label}</text>'
         )
 
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{title}">
+    return f'''<!-- yodo 性能图：由 bench/charts.py 生成，不要手改；样式规范见 brand/README.md。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {height}" width="{W}" height="{height}" role="img" aria-label="{title}：{'；'.join(f'{n} {l}' for n, l in zip(names, labels))}">
   <defs>
-    <pattern id="learn" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-      <rect width="8" height="8" fill="#c5c9d0"/>
-      <path d="M0 0h3v8H0z" fill="#dfe2e6"/>
-    </pattern>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{ACCENT[0]}"/><stop offset="1" stop-color="{ACCENT[1]}"/></linearGradient>
   </defs>
-  <rect width="{width}" height="{height}" rx="12" fill="#f4f5f7"/>
-  <g font-family='ui-sans-serif, system-ui, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif'>
-    <text x="20" y="32" font-size="16" font-weight="600" fill="#111">{title}</text>
-    {"".join(bars)}
-  </g>
+  <rect width="{W}" height="{height}" rx="24" fill="{INK}"/>
+  <text x="{PAD}" y="62" fill="{PAPER}" font-family="{CJK}" font-size="30" font-weight="600">{title}</text>
+  <text x="{PAD}" y="92" fill="{MUTED}" font-family="{CJK}" font-size="16">{hint}</text>
+  <text x="{W - PAD}" y="70" text-anchor="end" fill="url(#accent)" font-family="{LATIN}" font-size="56" font-weight="700" letter-spacing="-1">{factor}</text>
+  <text x="{W - PAD}" y="96" text-anchor="end" fill="{MUTED}" font-family="{CJK}" font-size="15">{factor_caption}</text>
+  {"".join(rows)}
+  <text x="{PAD}" y="{height - 26}" fill="{MUTED}" font-family="{CJK}" font-size="13">{note}</text>
+  <g opacity="0.9">{icon_at(W - PAD - 24, height - 48, 24)}</g>
 </svg>
-"""
-    path.write_text(svg, encoding="utf-8")
+'''
 
 
-def main() -> None:
-    here = Path(__file__).resolve().parent
-    names_ok = [row[0] for row in ROWS]
-    assert names_ok[0] == "yodo (run)" and names_ok[-1] == "yodo (learn)"
-    times = [row[1] for row in ROWS]
-    costs = [row[2] for row in ROWS]
-    kinds = [row[3] for row in ROWS]
-    bar_chart(
-        here / "time.svg",
-        "耗时（本次）",
-        times,
-        [TIME_LABEL[t] for t in times],
-        kinds,
-    )
-    bar_chart(
-        here / "cost.svg",
-        "花费（本次）",
-        costs,
-        [f"${c:.2f}" for c in costs],
-        kinds,
-    )
+def main():
+    seconds = [r[1] for r in ROWS]
+    dollars = [r[2] for r in ROWS]
+    assert ROWS[0][0] == "yodo (run)" and ROWS[0][3] == "run"
+    others = [r for r in ROWS if r[3] == "other"]
+    fastest = min(others, key=lambda r: r[1])
+    cheapest = min(others, key=lambda r: r[2])
+    note = "v1.2.0 · 读取 X Following 最近 3 条，发布到知乎和即刻 · 每种方式测试一次"
+
+    outputs = {
+        "time.svg": chart(
+            "耗时", "越短越好", seconds, [duration(s) for s in seconds],
+            f"{fastest[1] / ROWS[0][1]:.1f}×", f"比 {fastest[0]} 快", note),
+        "cost.svg": chart(
+            "花费", "越低越好", dollars, [f"${d:.2f}" for d in dollars],
+            f"{cheapest[2] / ROWS[0][2]:.1f}×", f"比 {cheapest[0]} 便宜", note),
+    }
+    for name, svg in outputs.items():
+        path = os.path.join(HERE, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg)
+        print(f"已生成 {path}")
 
 
 if __name__ == "__main__":

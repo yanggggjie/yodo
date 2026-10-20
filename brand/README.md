@@ -10,6 +10,7 @@
 | [`wordmark-light.svg`](wordmark-light.svg) | 字标，浅色背景 | `wordmark.py` 生成 |
 | [`wordmark-dark.svg`](wordmark-dark.svg) | 字标，深色背景 | `wordmark.py` 生成 |
 | [`social-preview.svg`](social-preview.svg) / [`.png`](social-preview.png) | GitHub 社交预览图，1280×640 | `wordmark.py` 生成，PNG 由 `make-icons.sh` 导出 |
+| [`bench/time.svg`](../bench/time.svg) / [`cost.svg`](../bench/cost.svg) | README 里的性能图，按本规范的颜色和字体 | `bench/charts.py` 生成，颜色字体取自 `wordmark.py` |
 
 生成的文件不要手改。改参数后运行 `sh brand/make-icons.sh`，一次重新生成全部。
 

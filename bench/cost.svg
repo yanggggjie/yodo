@@ -1,13 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="268" viewBox="0 0 720 268" role="img" aria-label="花费（本次）">
+<!-- yodo 性能图：由 bench/charts.py 生成，不要手改；样式规范见 brand/README.md。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 438" width="880" height="438" role="img" aria-label="花费：yodo (run) $0.24；agent-browser $0.83；browser-use $0.93；yodo (learn) $0.83">
   <defs>
-    <pattern id="learn" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-      <rect width="8" height="8" fill="#c5c9d0"/>
-      <path d="M0 0h3v8H0z" fill="#dfe2e6"/>
-    </pattern>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FF8A5B"/><stop offset="1" stop-color="#FF3D6E"/></linearGradient>
   </defs>
-  <rect width="720" height="268" rx="12" fill="#f4f5f7"/>
-  <g font-family='ui-sans-serif, system-ui, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif'>
-    <text x="20" y="32" font-size="16" font-weight="600" fill="#111">花费（本次）</text>
-    <rect x="168" y="52" width="135.2" height="40" rx="6" fill="#1f6b4a"/><text x="20" y="78" font-size="15" fill="#222">yodo (run)</text><text x="313.2" y="78" text-anchor="start" font-size="15" fill="#222">$0.24</text><rect x="168" y="106" width="467.7" height="40" rx="6" fill="#8b9099"/><text x="20" y="132" font-size="15" fill="#222">agent-browser</text><text x="623.7" y="132" text-anchor="end" font-size="15" fill="#222">$0.83</text><rect x="168" y="160" width="524.0" height="40" rx="6" fill="#8b9099"/><text x="20" y="186" font-size="15" fill="#222">browser-use</text><text x="680.0" y="186" text-anchor="end" font-size="15" fill="#222">$0.93</text><rect x="168" y="214" width="467.7" height="40" rx="6" fill="url(#learn)"/><text x="20" y="240" font-size="15" fill="#222">yodo (learn)</text><text x="623.7" y="240" text-anchor="end" font-size="15" fill="#222">$0.83</text>
+  <rect width="880" height="438" rx="24" fill="#0B0B10"/>
+  <text x="40" y="62" fill="#FFFFFF" font-family="'PingFang SC', 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', sans-serif" font-size="30" font-weight="600">花费</text>
+  <text x="40" y="92" fill="#A0A0AB" font-family="'PingFang SC', 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', sans-serif" font-size="16">越低越好</text>
+  <text x="840" y="70" text-anchor="end" fill="url(#accent)" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="56" font-weight="700" letter-spacing="-1">3.5×</text>
+  <text x="840" y="96" text-anchor="end" fill="#A0A0AB" font-family="'PingFang SC', 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', sans-serif" font-size="15">比 agent-browser 便宜</text>
+  <text x="40" y="158" fill="#FFFFFF" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600">yodo (run)</text><rect x="230" y="132" width="460" height="40" rx="10" fill="#FFFFFF" opacity="0.06"/><rect x="230" y="132" width="118.7" height="40" rx="10" fill="url(#accent)"/><text x="362.7" y="159" fill="url(#accent)" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="700">$0.24</text><text x="40" y="220" fill="#A0A0AB" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="500">agent-browser</text><rect x="230" y="194" width="460" height="40" rx="10" fill="#FFFFFF" opacity="0.06"/><rect x="230" y="194" width="410.5" height="40" rx="10" fill="#6B6B76"/><text x="654.5" y="221" fill="#FFFFFF" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="700">$0.83</text><text x="40" y="282" fill="#A0A0AB" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="500">browser-use</text><rect x="230" y="256" width="460" height="40" rx="10" fill="#FFFFFF" opacity="0.06"/><rect x="230" y="256" width="460.0" height="40" rx="10" fill="#6B6B76"/><text x="704.0" y="283" fill="#FFFFFF" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="700">$0.93</text><text x="40" y="344" fill="#A0A0AB" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="500">yodo (learn)</text><rect x="230" y="318" width="460" height="40" rx="10" fill="#FFFFFF" opacity="0.06"/><rect x="231" y="319" width="408.5" height="38" rx="9" fill="#6B6B76" fill-opacity="0.18" stroke="#6B6B76" stroke-width="2" stroke-dasharray="7 6"/><text x="654.5" y="345" fill="#FFFFFF" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="700">$0.83</text>
+  <text x="40" y="412" fill="#A0A0AB" font-family="'PingFang SC', 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', sans-serif" font-size="13">v1.2.0 · 读取 X Following 最近 3 条，发布到知乎和即刻 · 每种方式测试一次</text>
+  <g opacity="0.9"><svg x="816" y="390" width="24" height="24" viewBox="0 0 128 128">
+  <defs>
+    <!-- 三块区域各一条渐变：上方（两臂之间）暖橙到玫红，左侧靛紫，右下金黄到橙 -->
+    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="30" y1="0" x2="110" y2="60"><stop offset="0" stop-color="#FF8A5B"/><stop offset="1" stop-color="#FF3D6E"/></linearGradient>
+    <linearGradient id="left" gradientUnits="userSpaceOnUse" x1="0" y1="10" x2="60" y2="115"><stop offset="0" stop-color="#24166B"/><stop offset="1" stop-color="#6C3BE0"/></linearGradient>
+    <linearGradient id="right" gradientUnits="userSpaceOnUse" x1="130" y1="40" x2="50" y2="130"><stop offset="0" stop-color="#FFC857"/><stop offset="1" stop-color="#FF8A3D"/></linearGradient>
+    <clipPath id="tile"><rect width="128" height="128" rx="30"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- 底色即上方区域；左侧、右下两块盖在上面 -->
+    <rect width="128" height="128" fill="url(#top)"/>
+    <path d="M-12 -12 C22 2 56 36 70 84 C58 104 46 124 -12 122 L-12 -12 Z" fill="url(#left)"/>
+    <path d="M140 -14 L150 -14 L150 150 L-12 150 L-12 122 C46 124 58 104 70 84 C96 48 118 14 140 -14 Z" fill="url(#right)"/>
+    <!-- 两条白线画出 y：短臂（左上到相接点）和长斜线（右上经相接点，尾巴向左弯出左边缘） -->
+    <path d="M-12 -12 C22 2 56 36 70 84" stroke="#fff" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <path d="M140 -14 C118 14 96 48 70 84 C58 104 46 124 -12 122" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   </g>
+</svg>
+</g>
 </svg>
