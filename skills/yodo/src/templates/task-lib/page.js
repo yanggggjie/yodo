@@ -1,5 +1,5 @@
 /** 单个步骤（evaluate、goto、waitForSelector、expectRequest）的默认最长等待时间。 */
-export const STEP_TIMEOUT_MS = 30_000;
+export const STEP_TIMEOUT_MS = 60_000;
 
 function expressionOf(fnOrString, args) {
   if (typeof fnOrString === "string") return fnOrString;

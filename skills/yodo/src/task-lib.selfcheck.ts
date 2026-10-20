@@ -125,6 +125,11 @@ const waiting = { cdp: {
 } } as unknown as PageHandle;
 await waitForSelector(waiting, "#late");
 assert.equal(polls, 3, "前两次没找到，第三次出现");
+// timeout 选项：一直找不到时按指定时间报错，错误里带上时间
+{
+  const never = { cdp: { async send() { return { result: { value: false } }; }, on() { return () => {}; }, async once() { return {}; } } } as unknown as PageHandle;
+  await assert.rejects(waitForSelector(never, "#none", { timeout: 300 }), /timeout after 300ms: #none/);
+}
 
 // goto 等什么：只认本次导航提交之后的事件；until 控制等到哪一步；同文档跳转等 navigatedWithinDocument
 {
