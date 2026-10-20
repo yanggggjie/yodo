@@ -6,6 +6,8 @@
 | [`icon.svg`](icon.svg) | 由 `icon.py` 生成并提交，不要手改 |
 | [`make-icons.sh`](make-icons.sh) | 一条命令：先生成 SVG，再出 `skills/yodo/src/chrome-extension/icons/` 下 16、32、48、128 四个 PNG（需要 `rsvg-convert`） |
 
+字标、社交预览图和整体品牌规范（颜色、字体、口号）见 [README.md](README.md)。
+
 `sh brand/make-icons.sh` 生成的图标已验证与 2026-10-16 选定的版本逐像素一致（三个尺寸差异均为 0）。
 
 ## 一句话

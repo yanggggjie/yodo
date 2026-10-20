@@ -1,4 +1,9 @@
-# yodo
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/wordmark-dark.svg">
+    <img alt="yodo" src="brand/wordmark-light.svg" height="64">
+  </picture>
+</h1>
 
 > [!NOTE]
 > **You only do once：你只演示一次。**
@@ -124,4 +129,5 @@ flowchart LR
 
 - [更新记录](CHANGELOG.md)
 - [性能分析与复现方法](bench/README.md)
+- [品牌规范](brand/README.md)
 - **License**：yodo 源码使用 [Apache License 2.0](LICENSE)。用户创建的 `task`、`record`、session 和其它运行数据均属用户。**使用要求：yodo 仅用于完成个人浏览器任务，不得用于恶意抓取数据。**
