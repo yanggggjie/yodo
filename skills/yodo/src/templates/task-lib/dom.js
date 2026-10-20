@@ -1,5 +1,5 @@
 import { evaluate, STEP_TIMEOUT_MS } from "./page.js";
-import { callOn, describeTarget, locate, withElement } from "./locate.js";
+import { describeTarget, withElement } from "./locate.js";
 
 // ponytail: these helpers dispatch DOM events directly (no pointer coordinates).
 // Sliders, clientX menus, and editor-owned documents need a task-level evaluate.
@@ -78,13 +78,14 @@ export async function select(page, target, value, options) {
 }
 
 /**
- * 等待 selector 出现（visible：有尺寸；attached：存在于 DOM），最长 STEP_TIMEOUT_MS。
+ * 等待 selector 出现（visible：有尺寸；attached：存在于 DOM），最长 options.timeout（默认 STEP_TIMEOUT_MS）。
  * 在 Node 侧轮询，每次只做一次快速 evaluate，不在页面里跑长循环，超时报具体错误。
  * 只用于 CSS 选择器；动作本身（click 等）已经会等，一般不需要单独调用。
  */
 export async function waitForSelector(page, selector, options = {}) {
   const state = options.state ?? "visible";
-  const deadline = Date.now() + STEP_TIMEOUT_MS;
+  const timeout = options.timeout ?? STEP_TIMEOUT_MS;
+  const deadline = Date.now() + timeout;
   for (;;) {
     const found = await evaluate(page, (input) => {
       const element = document.querySelector(input.selector);
@@ -94,7 +95,7 @@ export async function waitForSelector(page, selector, options = {}) {
       return rect.width > 0 && rect.height > 0;
     }, { selector, state });
     if (found) return;
-    if (Date.now() >= deadline) throw new Error(`waitForSelector timeout: ${selector}`);
+    if (Date.now() >= deadline) throw new Error(`waitForSelector timeout after ${timeout}ms: ${selector}`);
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }

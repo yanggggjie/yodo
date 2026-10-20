@@ -10,9 +10,9 @@ export type RpcMessage = JsonRpcResponse | JsonRpcNotification;
 export const RPC_ERRORS = { PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL: -32603, PAGE_NOT_FOUND: -32001, RUN_BUSY: -32002, HANDSHAKE: -32010 } as const;
 
 export const HANDSHAKE_GUIDES: Record<HandshakeStatus, string> = {
-  "need-install": "yodo 的 Chrome 扩展或 native messaging 注册还没装好。请告诉我，我会运行安装命令；装好后在 chrome://extensions 里加载 yodo 扩展，完成后告诉我「好了」。",
-  "need-chrome": "没检测到正在运行的 Google Chrome。请启动 Chrome；好了告诉我。",
-  "need-extension": "yodo 的 Chrome 扩展没有连上。请按顺序做：\n1. 在 Chrome 地址栏打开 chrome://extensions，确认 yodo 是开启状态。如果找不到 yodo，告诉我，我会先运行安装命令。\n2. 在 yodo 卡片上点「service worker」，或点一下浏览器工具栏里的 yodo 图标。\n3. 做完后告诉我「好了」，我会重新运行刚才的命令。\n如果还是失败，告诉我，我会运行 yodo doctor 查看具体原因。",
+  "need-install": "yodo 还没有安装完成：扩展或 native messaging 注册缺失。",
+  "need-chrome": "没检测到正在运行的 Google Chrome。",
+  "need-extension": "yodo 的 Chrome 扩展没有连上。",
 };
 
 export function isHandshakeStatus(status: string): status is HandshakeStatus {

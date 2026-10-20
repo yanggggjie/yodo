@@ -5,6 +5,7 @@ import type { PageHandle } from "./sdk.ts";
 
 const calls: string[] = [];
 const expressions: string[] = [];
+const gestures: unknown[] = []; // 所有 evaluate、callFunctionOn 的 userGesture：一个都不能是 true（页面自发弹窗要被浏览器拦住）
 const listeners = new Map<string, (value: unknown) => void>();
 // 假页面：CSS 选择器 "#missing" 找不到，其它都找得到；无障碍树里 button "保存" 唯一，"重复" 有两个，"隐藏" 不存在。
 // visibleAfter 控制元素要过几次检查才可见，用来测自动等待。
@@ -19,6 +20,7 @@ const page = { cdp: {
   async send(method: string, params?: any) {
     calls.push(method);
     if (method === "Runtime.evaluate") {
+      gestures.push(params?.userGesture);
       const expression = String(params?.expression ?? "");
       if (expression.startsWith("document.querySelector(")) {
         const selector = JSON.parse(expression.match(/querySelector\((.*)\)/)![1]!);
@@ -29,9 +31,11 @@ const page = { cdp: {
     if (method === "Runtime.callFunctionOn") {
       const fn = String(params?.functionDeclaration ?? "");
       if (fn.includes("getBoundingClientRect")) {
+        gestures.push(params?.userGesture);
         checks++;
         return { result: { value: checks > visibleAfter } };
       }
+      gestures.push(params?.userGesture);
       expressions.push(`${params.objectId} ${fn}`);
       if (fn.includes("setter.call")) return { result: { value: params.arguments[0].value } };
       if (fn.includes("checked")) return { result: { value: false } };
@@ -112,8 +116,8 @@ assert.equal(await toggle(page, { role: "button", name: "保存" }, { target: tr
 // waitForSelector 在 Node 侧轮询：每次只做一次快速 evaluate，出现后立即返回
 let polls = 0;
 const waiting = { cdp: {
-  async send(method: string) {
-    if (method === "Runtime.evaluate") { polls++; return { result: { value: polls >= 3 } }; }
+  async send(method: string, params?: any) {
+    if (method === "Runtime.evaluate") { polls++; gestures.push(params?.userGesture); return { result: { value: polls >= 3 } }; }
     return {};
   },
   on() { return () => {}; },
@@ -121,6 +125,11 @@ const waiting = { cdp: {
 } } as unknown as PageHandle;
 await waitForSelector(waiting, "#late");
 assert.equal(polls, 3, "前两次没找到，第三次出现");
+// timeout 选项：一直找不到时按指定时间报错，错误里带上时间
+{
+  const never = { cdp: { async send() { return { result: { value: false } }; }, on() { return () => {}; }, async once() { return {}; } } } as unknown as PageHandle;
+  await assert.rejects(waitForSelector(never, "#none", { timeout: 300 }), /timeout after 300ms: #none/);
+}
 
 // goto 等什么：只认本次导航提交之后的事件；until 控制等到哪一步；同文档跳转等 navigatedWithinDocument
 {
@@ -193,4 +202,7 @@ assert.equal(polls, 3, "前两次没找到，第三次出现");
   }
 }
 
+
+// userGesture：evaluate、元素动作、轮询都不带（无人值守，页面自发弹窗被浏览器拦住，不会开新标签抢前台）
+assert.ok(gestures.length > 10 && gestures.every((value) => value !== true), "所有 evaluate / callFunctionOn 都不能带 userGesture:true");
 console.log("task lib selfcheck ok");

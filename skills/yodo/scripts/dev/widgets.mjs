@@ -1,6 +1,6 @@
 // 场景：重定向、下拉框、confirm 对话框、单页应用路由、target=_blank 新标签、跨站 iframe。
-import { findPage } from "../../skills/yodo/src/dev/driver.ts";
-import { sessionRpc } from "../../skills/yodo/src/cli/rpc.ts";
+import { findPage } from "../../src/dev/driver.ts";
+import { sessionRpc } from "../../src/cli/rpc.ts";
 
 export default async function (page, base) {
   await page.goto(`${base}/old`);                       // 302 → /search?q=redirected

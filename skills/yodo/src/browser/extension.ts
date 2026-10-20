@@ -8,6 +8,11 @@
  * ponytail: 只支持一个扩展连接、一个 holder；无 per-session 隔离、无分片（host→扩展只发小命令）。
  */
 import { CDP_COMMAND_TIMEOUT_MS } from "../utils/constants.ts";
+
+const COMMAND_TIMEOUT_PREFIX = "扩展命令超时";
+/** 会在页面里执行脚本的 CDP 方法：它们超时后要补发 Runtime.terminateExecution。 */
+const SCRIPT_METHODS = new Set(["Runtime.evaluate", "Runtime.callFunctionOn"]);
+const TERMINATE_TIMEOUT_MS = 3_000;
 import { NeedExtensionError } from "./connect.ts";
 import type { RawCdpConnection } from "./session.ts";
 
@@ -53,7 +58,7 @@ export class ExtensionLink {
         let timer: ReturnType<typeof setTimeout> | undefined;
         if (ms > 0) {
           timer = setTimeout(() => {
-            if (this.pending.delete(id)) reject(new Error(`扩展命令超时 ${ms}ms：${String(msg.method ?? msg.name)}`));
+            if (this.pending.delete(id)) reject(new Error(`${COMMAND_TIMEOUT_PREFIX} ${ms}ms：${String(msg.method ?? msg.name)}`));
           }, ms);
           timer.unref?.();
         }
@@ -82,7 +87,16 @@ export class ExtensionLink {
     const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs?: number): Promise<unknown> => {
       // 页面级 CDP 只能发给某个 tab（sessionId = tabId）；browser 级命令已由 ops 取代。
       if (!sessionId) return Promise.reject(new Error(`browser 级 CDP 不可用：${method}`));
-      return call({ op: "cdp", tabId: Number(sessionId), method, params }, timeoutMs);
+      const sent = call({ op: "cdp", tabId: Number(sessionId), method, params }, timeoutMs);
+      // 执行页面脚本的命令超时了：命令被放弃，但脚本还在页面里跑（死循环会让标签页一直卡着），补发一次终止。
+      // 页面空闲时发也安全，不会影响后面的命令；失败就算了，原来的超时错误照常抛出。
+      if (!SCRIPT_METHODS.has(method)) return sent;
+      return sent.catch((error: unknown) => {
+        if (error instanceof Error && error.message.startsWith(COMMAND_TIMEOUT_PREFIX)) {
+          send("Runtime.terminateExecution", {}, sessionId, TERMINATE_TIMEOUT_MS).catch(() => {});
+        }
+        throw error;
+      });
     };
 
     const on = (method: string, handler: Handler): (() => void) => {

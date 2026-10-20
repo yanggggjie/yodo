@@ -10,7 +10,7 @@ export function press(page: PageHandle, target: Target, key: string, options?: A
 export function scroll(page: PageHandle, selector: string | undefined, options: { deltaX?: number; deltaY?: number }): Promise<void>;
 export function check(page: PageHandle, target: Target, checked: boolean, options?: ActionOptions): Promise<"already" | "done">;
 export function select(page: PageHandle, target: Target, value: string, options?: ActionOptions): Promise<void>;
-export function waitForSelector(page: PageHandle, selector: string, options?: { state?: "attached" | "visible" }): Promise<void>;
+export function waitForSelector(page: PageHandle, selector: string, options?: { state?: "attached" | "visible"; timeout?: number }): Promise<void>;
 export function toggle(
   page: PageHandle,
   target: Target,

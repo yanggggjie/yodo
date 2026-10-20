@@ -25,7 +25,7 @@ const scan = (file) => {
   });
 };
 for (const file of walk(HERE)) if (file !== fileURLToPath(import.meta.url)) scan(file);
-scan(path.resolve(HERE, "../../../AGENTS.md"));
+for (const doc of ["AGENTS.md", "ARCHITECTURE.md"]) scan(path.resolve(HERE, "..", doc));
 
 assert.deepEqual(hits, [], `发现已移除的 trusted / Input 相关内容：\n${hits.join("\n")}`);
 console.log("guard selfcheck ok");

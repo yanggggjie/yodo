@@ -28,11 +28,13 @@ export const SESSION_LOG = path.join(SESSION_DIR, "log.jsonl");
 export const CDP_SHORT_TIMEOUT_MS = 2_000;
 /** holder 起来并连上已开 CDP 的 Chrome。不等 Allow。 */
 export const HOLDER_READY_MS = 8_000;
-export const CDP_COMMAND_TIMEOUT_MS = 30_000;
+/** 单条 CDP 命令的上限；task-lib 的 STEP_TIMEOUT_MS 与它保持一致，否则 evaluate 里的慢请求会先撞上这一个。 */
+export const CDP_COMMAND_TIMEOUT_MS = 60_000;
 /** CLI 等 holder 回包时，在 holder 侧上限之外多留的缓冲。 */
 export const CLI_RPC_BUFFER_MS = 5_000;
 /** 单个 task 子进程的默认最长运行时间，超时按失败返回并终止进程；task 头部可用 @timeout <秒> 调整。 */
-export const TASK_TIMEOUT_MS = 90_000;
+/** 比常见 shell 工具的 120 秒默认超时少 5 秒，调用方还没被它的超时打断，就能拿到 yodo 的超时错误。 */
+export const TASK_TIMEOUT_MS = 115_000;
 /** run.begin 遇到另一个 task 正在运行时，自动等待并重试的最长时间。 */
 export const RUN_BUSY_WAIT_MS = 30_000;
 export const RECORD_STOP_RPC_MS = 60_000;

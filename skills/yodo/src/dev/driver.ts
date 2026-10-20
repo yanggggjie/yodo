@@ -1,6 +1,7 @@
 /**
  * dev Driver：在录制窗口里模拟用户操作。设计与约束见 AGENTS.md 2.3。
  * 全部是页面内的 DOM 操作（Runtime.evaluate），不使用 Input 域；录制器记录所有页面事件，不做区分。
+ * 操作类脚本带 userGesture:true（不然 target=_blank 的点击会被弹窗拦截），事件本身仍是脚本合成的。
  * 只用 Runtime.evaluate、Page.navigate、Page.handleJavaScriptDialog；不调用任何 *.disable。
  * 阻塞式对话框（confirm、alert）会让 evaluate 挂起：驱动在操作期间按 dialog 策略处理它。
  */
@@ -26,8 +27,8 @@ export class DevPage {
     return sessionRpc("dev.cdp", { pageId: this.pageId, method, params }, 30_000);
   }
 
-  async eval<T = unknown>(expression: string): Promise<T> {
-    const r = await this.cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  async eval<T = unknown>(expression: string, userGesture = false): Promise<T> {
+    const r = await this.cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, ...(userGesture ? { userGesture } : {}) });
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
     return r.result.value as T;
   }
@@ -56,7 +57,7 @@ export class DevPage {
    */
   private async act(expression: string, dialog: DialogPolicy): Promise<string> {
     let settled = false;
-    const pending = this.eval<string>(expression).finally(() => { settled = true; });
+    const pending = this.eval<string>(expression, true).finally(() => { settled = true; });
     for (let waited = 0; !settled && waited < 40; waited++) {
       await sleep(100);
       if (waited >= 2) await this.cdp("Page.handleJavaScriptDialog", { accept: dialog === "accept" }).catch(() => {});

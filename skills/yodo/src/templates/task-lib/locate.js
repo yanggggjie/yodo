@@ -9,7 +9,7 @@ const POLL_MS = 200;
 
 export const describeTarget = (target) => (typeof target === "string" ? target : `${target.role} "${target.name}"`);
 
-/** 在页面里执行 fn(el, ...args)，el 是 objectId 对应的元素。返回 fn 的结果，异常直接抛出。 */
+/** 在页面里执行 fn(el, ...args)，el 是 objectId 对应的元素。返回 fn 的结果，异常直接抛出。不带 userGesture，见 page.js 的 evaluate。 */
 export async function callOn(page, objectId, fn, ...args) {
   const response = await page.cdp.send("Runtime.callFunctionOn", {
     objectId,

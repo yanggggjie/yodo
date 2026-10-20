@@ -3,11 +3,9 @@
 > [!NOTE]
 > **You only do once：只需要你演示一次。**
 
-yodo 是一个帮助你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 属于同类浏览器任务工具。
+yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 同类。
 
-yodo 使用你本机已登录账号的 Google Chrome 完成任务；
-
-新任务只需演示一次，学会后可直接运行脚本，**完成任务更快、token 消耗更少**。
+它使用你本机已登录的 Google Chrome，新任务只需演示一次，学会后直接运行脚本，**更快、token 更省**。
 
 <a href="https://www.youtube.com/watch?v=KfW4o9qQoE0">
   <img src="https://img.youtube.com/vi/KfW4o9qQoE0/hqdefault.jpg" alt="yodo 演示视频" width="360">
@@ -77,27 +75,36 @@ shell 次数表示 Claude Code 发起了多少次工具调用。思考时间是 
 https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 ```
 
-公开安装跟随 GitHub 默认分支 `main`。
-
-首次安装需要 Node ≥ 24 和 Google Chrome，并在 `chrome://extensions` 里加载一次 yodo 扩展（agent 会告诉你扩展目录和具体步骤）。之后升级如果扩展有更新，agent 会提示你在同一页面点一下刷新。
+需要 Node ≥ 24 和 Google Chrome。首次安装要在 `chrome://extensions` 里加载一次 yodo 扩展，agent 会告诉你具体步骤；之后扩展有更新时，点一下刷新即可。
 
 > [!IMPORTANT]
 > - 新网站需先演示一次，yodo 不会自行探索。
-> - **yodo 更适合普通网站**。抖音、小红书等风控网站更多依赖页面操作，运行较慢；
+> - 更适合普通网站；抖音、小红书等风控网站更多依赖页面操作，运行较慢。
 > - 请勿批量使用，以免影响网站运行或账号安全。
 
-### 2.2 更新记录
+### 2.2 遇到问题
+
+> [!IMPORTANT]
+> **yodo 完全以源码分发。** 全部源码和文档都在本机 `~/.yodo`。遇到任何问题，直接问你的 agent，它会读源码并帮你修复。
+
+### 2.3 更新记录
+
+#### v2.0.1
+
+- 完全以源码分发，遇到问题可让 agent 读源码修复，见「2.2 遇到问题」。
+- 从 v1 升级时给出完整的扩展加载步骤，并检查旧 task。
+- 登录失效时提醒你重新登录。
+- 超时放宽：单个步骤 60 秒，整个 task 115 秒。
 
 #### v2.0.0
 
-- 改用 Chrome 扩展连接 Chrome：不再需要开启 remote debugging，也不再有 Allow 弹窗。首次使用需要在 `chrome://extensions` 里加载一次 yodo 扩展。
-- 录制更完整：记录点击、输入、勾选、滚动和页面跳转（含单页应用、新标签页、iframe），并给出元素的选择器、角色和名称，学习更准确。录制和运行窗口都在后台打开，不抢焦点。
-- 命令统一为 `yodo`（`run`、`eval`、`record`、`daemon`、`doctor`）；task 参数改为具名，`yodo run <task> --参数 值`。
-- 运行更稳定：单步和整体超时、并发时自动等待、失败信息与退出码统一，并保存运行历史；`yodo eval` 可顺序组合多个 task。
-- 升级更简单：安装脚本会在后台进程空闲时自动换成新版本；正在运行任务或录制时，等结束后运行 `yodo daemon restart`。`doctor` 能报告版本是否一致。
-- 扩展有了图标；点击工具栏上的 yodo 图标，可以立即重新连接。
-- 系统支持：macOS 已验证；Windows 与 Linux 已有适配，尚未充分测试。
-- **不兼容**：v1 学会的、带参数的 task 需要改成具名参数（`@param 名字` 与 `yodo.params.名字`）才能继续使用；`~/.yodo/temp` 和 `@executor` 取消。
+- 改用 Chrome 扩展连接，不再需要 remote debugging 和 Allow 弹窗，首次使用加载一次扩展。
+- 录制更完整，覆盖点击、输入、勾选、滚动和页面跳转（含单页应用、新标签页、iframe）。
+- 命令统一为 `yodo`，task 参数改为具名：`yodo run <task> --参数 值`；`yodo eval` 可组合多个 task。
+- 运行更稳定：超时、并发等待和失败信息统一，保存运行历史。
+- 升级自动换新版本；任务或录制进行中时，结束后运行 `yodo daemon restart`。
+- macOS 已验证，Windows、Linux 尚未充分测试。
+- **不兼容**：v1 带参数的 task 需改成具名参数；`~/.yodo/temp` 和 `@executor` 取消。
 
 #### v1.2.0
 
@@ -143,7 +150,7 @@ yodo：请切换到标题为 yodo record 的窗口（它在后台打开）完整
 3. 查看指定型号的购买选项
 ```
 
-yodo 会先保存这次演示，再把用户列出的操作作为具体目标，按顺序拆分、匹配并学习。只回复“好了”时，yodo 会先结束录制，再询问要从这次演示中学习哪些操作。
+yodo 先保存这次演示，再按你列出的操作逐个学习。只回复“好了”时，yodo 会先结束录制，再问你要学哪些。
 
 ### 3.3 查看 yodo 会什么
 
@@ -162,7 +169,7 @@ TypeError: Cannot read properties of undefined (reading 'id')
 使用 yodo 来查日志，然后修复这个 bug
 ```
 
-首次使用时，按 agent 提示在 `chrome://extensions` 里加载 yodo 扩展，然后回复“好了”。
+首次使用先按 agent 提示加载 yodo 扩展。
 
 > [!IMPORTANT]
 > 规则只有一条：输入中带上 `yodo` 这个触发词。
@@ -229,7 +236,7 @@ Authorization: Bearer ⟨secret_001:jwt⟩
 
 ### 5.3 本机数据
 
-yodo 以源码分发，源码、`task`、`record` 等**所有数据**都保存在本机，可随意查看：
+源码、`task`、`record` 等所有数据都保存在本机，可随意查看：
 
 ```text
 ~/.yodo/
@@ -237,7 +244,7 @@ yodo 以源码分发，源码、`task`、`record` 等**所有数据**都保存�
 
 ### 5.4 Chrome 扩展与权限
 
-yodo 的扩展只做一件事：把本机 yodo 进程的指令转给 Chrome。它声明了这些权限：
+扩展只做一件事：把本机 yodo 进程的指令转给 Chrome。声明的权限：
 
 | 权限 | 用途 |
 |---|---|
@@ -246,9 +253,9 @@ yodo 的扩展只做一件事：把本机 yodo 进程的指令转给 Chrome。�
 | `nativeMessaging` | 与本机的 yodo 进程通信，不经过网络 |
 | `storage`、`alarms` | 记录 yodo 打开了哪些窗口；断线后自动重连 |
 
-- 扩展**只操作 yodo 自己打开的窗口和标签页**，以及这些标签页里打开的新标签页；对其它标签页的操作一律拒绝。
-- 扩展没有声明任何网站（host）权限，也没有对外联网的调用（唯一的 `fetch` 读取的是扩展自己的文件，用来计算版本）。
-- `tabs` 权限在技术上能看到所有标签页的地址和标题，所以我们把边界写在代码里：扩展只有约 270 行，源码在 [`skills/yodo/src/chrome-extension/`](skills/yodo/src/chrome-extension/)，可直接查看。
+- 只操作 yodo 自己打开的窗口和标签页（含其中新开的标签页），其它一律拒绝。
+- 没有网站（host）权限，也不对外联网（唯一的 `fetch` 读的是扩展自己的文件，用来计算版本）。
+- `tabs` 权限技术上能看到所有标签页的地址和标题，所以边界写在代码里：扩展只有约 270 行，源码在 [`skills/yodo/src/chrome-extension/`](skills/yodo/src/chrome-extension/)，可直接查看。
 
 ## 6. Benchmark 说明
 

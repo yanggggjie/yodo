@@ -51,6 +51,21 @@ import { ExtensionLink, frame, parseFrames, PROTOCOL_VERSION } from "./extension
 
   // browser 级命令（无 sessionId）不发出去
   await assert.rejects(link.raw.send("Target.getTargets"), /browser 级 CDP 不可用/);
+
+  const keepAlive = setInterval(() => {}, 10); // 命令超时的定时器是 unref 的，等待期间要有别的句柄撑着进程
+  // 页面脚本命令超时：补发一次 Runtime.terminateExecution（同一个 tab）；其它方法超时不补发；终止命令自己超时不再补发
+  const before = written.length;
+  await assert.rejects(link.raw.send("Runtime.evaluate", { expression: "while(true){}" }, "9", 20), /扩展命令超时/);
+  const terminate = written.slice(before).find((m) => m.method === "Runtime.terminateExecution");
+  assert.equal(terminate?.tabId, 9, "脚本命令超时后应对同一个 tab 补发终止");
+  await assert.rejects(link.raw.send("Runtime.callFunctionOn", { functionDeclaration: "function(){}" }, "9", 20), /扩展命令超时/);
+  const mark = written.length;
+  await assert.rejects(link.raw.send("Page.navigate", { url: "https://a" }, "9", 20), /扩展命令超时/);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(!written.slice(mark).some((m) => m.method === "Runtime.terminateExecution"), "非脚本命令超时不补发");
+  const terminated = written.filter((m) => m.method === "Runtime.terminateExecution").length;
+  assert.equal(terminated, 2, "每次脚本命令超时只补发一次，终止命令自己超时不再触发补发");
+  clearInterval(keepAlive);
   assert.equal(written.filter((m) => m.method === "Target.getTargets").length, 0);
 }
 

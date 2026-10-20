@@ -1,13 +1,17 @@
 /** 单个步骤（evaluate、goto、waitForSelector、expectRequest）的默认最长等待时间。 */
-export const STEP_TIMEOUT_MS = 30_000;
+export const STEP_TIMEOUT_MS = 60_000;
 
 function expressionOf(fnOrString, args) {
   if (typeof fnOrString === "string") return fnOrString;
   return `(async () => (${fnOrString.toString()})(${args.map((arg) => JSON.stringify(arg)).join(", ")}))()`;
 }
 
+/**
+ * 在页面内执行函数或表达式。不带 userGesture：yodo 无人值守，页面自己（或这里的脚本）调用 window.open 会被浏览器拦住，
+ * 不会弹出新标签、更不会抢前台。一个 task 只处理一个页面，需要另一个页面的流程拆成另一个 task。
+ */
 export async function evaluate(page, fnOrString, ...args) {
-  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true, userGesture: true });
+  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true });
   if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "evaluate failed");
   return response.result.value;
 }
