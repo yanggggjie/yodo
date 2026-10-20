@@ -132,7 +132,6 @@ export class CdpPage {
           expression,
           returnByValue: true,
           awaitPromise: true,
-          userGesture: true,
         },
         this.sessionId,
       )) as typeof response;

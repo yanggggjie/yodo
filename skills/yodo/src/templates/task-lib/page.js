@@ -6,10 +6,20 @@ function expressionOf(fnOrString, args) {
   return `(async () => (${fnOrString.toString()})(${args.map((arg) => JSON.stringify(arg)).join(", ")}))()`;
 }
 
-export async function evaluate(page, fnOrString, ...args) {
-  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true, userGesture: true });
+async function run(page, fnOrString, args, userGesture) {
+  const response = await page.cdp.send("Runtime.evaluate", { expression: expressionOf(fnOrString, args), returnByValue: true, awaitPromise: true, userGesture });
   if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || "evaluate failed");
   return response.result.value;
+}
+
+/** task 里用的 evaluate：可能包含点击等操作，所以算作用户操作（userGesture），target=_blank 才打得开。 */
+export async function evaluate(page, fnOrString, ...args) {
+  return run(page, fnOrString, args, true);
+}
+
+/** 库内部的只读查询（轮询等）：不带 userGesture，否则轮询会让页面一直处于被用户激活的状态，页面自己发起的弹窗也被放行。 */
+export async function query(page, fnOrString, ...args) {
+  return run(page, fnOrString, args, false);
 }
 
 /**

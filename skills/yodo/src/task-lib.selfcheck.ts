@@ -5,7 +5,9 @@ import type { PageHandle } from "./sdk.ts";
 
 const calls: string[] = [];
 const expressions: string[] = [];
-const gestures: unknown[] = []; // 每次 callFunctionOn 的 userGesture
+const actionGestures: unknown[] = []; // 动作（非 isActionable 检查）的 callFunctionOn 的 userGesture
+const queryGestures: unknown[] = []; // 只读检查（isActionable、读 checked 状态）的 userGesture
+const evaluateGestures: unknown[] = []; // Runtime.evaluate 的 userGesture
 const listeners = new Map<string, (value: unknown) => void>();
 // 假页面：CSS 选择器 "#missing" 找不到，其它都找得到；无障碍树里 button "保存" 唯一，"重复" 有两个，"隐藏" 不存在。
 // visibleAfter 控制元素要过几次检查才可见，用来测自动等待。
@@ -20,6 +22,7 @@ const page = { cdp: {
   async send(method: string, params?: any) {
     calls.push(method);
     if (method === "Runtime.evaluate") {
+      evaluateGestures.push(params?.userGesture);
       const expression = String(params?.expression ?? "");
       if (expression.startsWith("document.querySelector(")) {
         const selector = JSON.parse(expression.match(/querySelector\((.*)\)/)![1]!);
@@ -28,12 +31,13 @@ const page = { cdp: {
       return { result: { value: 42 } }; // evaluate 的普通调用，比如 scroll
     }
     if (method === "Runtime.callFunctionOn") {
-      gestures.push(params?.userGesture);
       const fn = String(params?.functionDeclaration ?? "");
       if (fn.includes("getBoundingClientRect")) {
+        queryGestures.push(params?.userGesture);
         checks++;
         return { result: { value: checks > visibleAfter } };
       }
+      (fn.includes("checked") || fn.includes("fnSource") ? queryGestures : actionGestures).push(params?.userGesture);
       expressions.push(`${params.objectId} ${fn}`);
       if (fn.includes("setter.call")) return { result: { value: params.arguments[0].value } };
       if (fn.includes("checked")) return { result: { value: false } };
@@ -62,13 +66,15 @@ const page = { cdp: {
 } } as unknown as PageHandle;
 
 assert.equal(await evaluate(page, "21 * 2"), 42);
+assert.equal(evaluateGestures.at(-1), true, "task 里的 evaluate 可能含操作，带 userGesture");
 await goto(page, "https://example.com");
 assert.deepEqual(calls, ["Runtime.evaluate", "Page.enable", "Page.navigate"], "evaluate 不需要 Runtime.enable");
 assert.equal(listeners.size, 0);
 
 
 await click(page, "#go");
-assert.ok(gestures.length > 0 && gestures.every((value) => value === true), "元素动作要带 userGesture:true，否则 target=_blank 会被弹窗拦截");
+assert.ok(actionGestures.length > 0 && actionGestures.every((value) => value === true), "元素动作要带 userGesture:true，否则 target=_blank 会被弹窗拦截");
+assert.ok(queryGestures.length > 0 && queryGestures.every((value) => value !== true), "定位时的可操作性检查是只读查询，不带 userGesture");
 await fill(page, "#q", "hello");
 await press(page, "#q", "Enter");
 await scroll(page, undefined, { deltaY: 120 });
@@ -114,9 +120,10 @@ assert.equal(await toggle(page, { role: "button", name: "保存" }, { target: tr
 
 // waitForSelector 在 Node 侧轮询：每次只做一次快速 evaluate，出现后立即返回
 let polls = 0;
+const waitingGestures: unknown[] = [];
 const waiting = { cdp: {
-  async send(method: string) {
-    if (method === "Runtime.evaluate") { polls++; return { result: { value: polls >= 3 } }; }
+  async send(method: string, params?: any) {
+    if (method === "Runtime.evaluate") { polls++; waitingGestures.push(params?.userGesture); return { result: { value: polls >= 3 } }; }
     return {};
   },
   on() { return () => {}; },
@@ -124,6 +131,7 @@ const waiting = { cdp: {
 } } as unknown as PageHandle;
 await waitForSelector(waiting, "#late");
 assert.equal(polls, 3, "前两次没找到，第三次出现");
+assert.ok(waitingGestures.length === 3 && waitingGestures.every((value) => value !== true), "waitForSelector 的轮询不带 userGesture");
 
 // goto 等什么：只认本次导航提交之后的事件；until 控制等到哪一步；同文档跳转等 navigatedWithinDocument
 {

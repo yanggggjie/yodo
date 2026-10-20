@@ -28,6 +28,7 @@ yodo 运行时架构。仓库边界、开发验证、分发发布见同目录的
 - `RpcPeer.failure`：连接意外断开、或监听函数抛错时 reject；`yodo.run` 把它和 task 函数赛跑，task 不会因此一直挂着，监听函数里的错误成为这次 run 的失败，而不是进程的未捕获异常。daemon 写队列超限（单条 16 MB、排队 64 MB）时，先写一行没有 id 的错误说明原因再断开连接，client 把它作为失败原因。
 - run 结束（`runEnd`）：关掉本次 run 的 tab，以及 run 期间在 run 窗口里新开的 tab（点 `target=_blank` 链接等，扩展按 opener 纳入），锚点保留。清理做完才释放模式，下一个 `run.begin` 不会和清理同时操作 run 窗口。`window.open` 带窗口特征弹出的独立窗口不在这里处理。
 - 定位（`templates/task-lib/locate.js`）：目标是 CSS 字符串或 `{ role, name }`。role/name 用 `Accessibility.queryAXTree`（根是 `document` 对象）查找，`DOM.resolveNode` 转成元素，必须唯一；CSS 保持取第一个匹配的旧行为。动作（click、fill、press、check、select、toggle）先等元素存在、可见且未禁用，默认 `ACTION_TIMEOUT_MS`（10 秒），超时报出在等什么。
+- `userGesture`：动作（click、fill、press、select、check、toggle 的执行那一下）和 task 里调用的 `evaluate` 带 `userGesture: true`，否则 `target=_blank` 的点击会被弹窗拦截；库内部的只读查询（`waitForSelector` 的轮询、定位时的可操作性检查、`check`/`toggle` 读当前状态）不带，因为带了会让页面一直处于被用户激活的状态，页面自己发起的弹窗也会被放行。
 - `waitForSelector` 在 Node 侧轮询，不在页面里跑长循环；它没有 `timeout` 参数，固定使用单步骤上限。
 - `RpcPeer`（`src/cli/rpc.ts`）是唯一的 socket 客户端：`sessionRpc` 是一次一连接的用法，SDK 用它保持长连接并接收页面事件。
 
