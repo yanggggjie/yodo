@@ -12,13 +12,9 @@
 
 yodo 是帮你完成个人浏览器任务的 skill，与 `browser-use`、`agent-browser` 同类。它使用你本机已登录的 Google Chrome：新任务只需演示一次，学会后直接运行脚本，**更快、token 更省**。
 
-**yodo 宣传视频**
+**请看视频⬇️**
 
-<a href="https://youtu.be/ktO6uuVL0Yo">
-  <img src="https://img.youtube.com/vi/ktO6uuVL0Yo/maxresdefault.jpg" alt="yodo 宣传视频" width="640">
-</a>
-
-点击图片，在 YouTube 播放。
+https://github.com/user-attachments/assets/0f3b3dcd-3ee8-4030-97be-7cd4d6a04ddb
 
 测试任务：读取 X Following 最近 3 条，生成中文摘要，再分别发布到知乎和即刻。
 
