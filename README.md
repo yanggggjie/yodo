@@ -43,7 +43,7 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 需要 Node ≥ 24 和 Google Chrome。首次安装要在 `chrome://extensions` 里加载一次 yodo 扩展，agent 会告诉你具体步骤；之后扩展有更新时，点一下刷新即可。macOS 已验证，Windows、Linux 尚未充分测试。
 
 > [!IMPORTANT]
-> - 新网站需先演示一次，yodo 不会自行探索。
+> - 新网站你先做一遍，yodo 在旁边学，以后替你做。yodo 不会自己乱点，不会误操作你的账号。
 > - 更适合普通网站；抖音、小红书等风控网站更多依赖页面操作，运行较慢。
 > - 请勿批量使用，以免影响网站运行或账号安全。
 
@@ -57,6 +57,17 @@ https://github.com/yanggggjie/yodo/blob/main/skills/yodo/install.md
 
 ```text
 yodo 帮我搜索一下知乎 agent，然后看看第三条帖子的内容是什么，再给第三条点赞
+```
+
+如果 yodo 还没学过这件事，它会请你做一遍，你照常做完就行：
+
+```text
+yodo：我还没学过这个。请你在「yodo record」窗口里做一遍，我来学，以后我来做。
+
+1. 搜索「机械键盘」
+2. 点开第一条
+
+做完说「好了」。
 ```
 
 **教 yodo 学会新操作**
